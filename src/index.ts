@@ -3,6 +3,7 @@ import * as github from '@actions/github';
 import { getConfig } from './config.js';
 import { getPullRequestDiff, getLocalGitDiff } from './git.js';
 import { SecurityScanner } from './engine/scanner.js';
+import { RemediationEngine } from './remediation/engine.js';
 import { PrCommenter } from './reporter/pr-commenter.js';
 import { SeverityLevel } from './types.js';
 
@@ -26,6 +27,7 @@ export async function run(): Promise<void> {
     core.info(`Commit SHA: ${sha}`);
     core.info(`Fail-On Threshold: ${config.failOn}`);
     core.info(`Only Diff: ${config.onlyDiff}`);
+    core.info(`AI Remediation: ${config.aiRemediation ? config.provider : 'disabled'}`);
 
     const prNumber = github.context.payload.pull_request?.number;
     const prHeadSha = github.context.payload.pull_request?.head?.sha || sha;
@@ -59,6 +61,26 @@ export async function run(): Promise<void> {
 
     core.info(`Scanned ${scanResult.totalFilesScanned} file(s). Found ${scanResult.findings.length} issue(s).`);
     core.info(`Severity Breakdown: [CRITICAL: ${scanResult.summary.critical}] [HIGH: ${scanResult.summary.high}] [MEDIUM: ${scanResult.summary.medium}] [LOW: ${scanResult.summary.low}]`);
+
+    if (config.aiRemediation && scanResult.findings.length > 0) {
+      core.info(`Running AI Remediation using provider '${config.provider}'...`);
+      const remediationEngine = new RemediationEngine({
+        provider: config.provider,
+        apiKey: config.apiKey
+      });
+
+      for (const finding of scanResult.findings) {
+        try {
+          const patch = await remediationEngine.generatePatch(finding);
+          if (patch) {
+            finding.suggestedPatch = patch;
+            core.info(`Generated AI fix for ${finding.file}:${finding.line} (${finding.ruleId})`);
+          }
+        } catch (err) {
+          core.warning(`Failed to generate AI fix for ${finding.file}:${finding.line}: ${String(err)}`);
+        }
+      }
+    }
 
     core.setOutput('findings-count', scanResult.summary.total.toString());
     core.setOutput('critical-count', scanResult.summary.critical.toString());

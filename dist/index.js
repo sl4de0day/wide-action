@@ -32250,6 +32250,193 @@ class SecurityScanner {
     }
 }
 
+;// CONCATENATED MODULE: ./src/remediation/engine.ts
+
+class RemediationEngine {
+    provider;
+    apiKey;
+    timeoutMs;
+    constructor(options) {
+        this.provider = options.provider.trim().toLowerCase();
+        this.apiKey = options.apiKey || this.resolveApiKey(this.provider);
+        this.timeoutMs = options.timeoutMs || 15000;
+    }
+    async generatePatch(finding, surroundingContext = '') {
+        if (!this.apiKey) {
+            core.info(`AI Remediation skipped: No API key provided for provider '${this.provider}'.`);
+            return null;
+        }
+        const prompt = this.buildPrompt(finding, surroundingContext);
+        try {
+            let rawResponse = null;
+            if (this.provider === 'gemini') {
+                rawResponse = await this.callGemini(prompt);
+            }
+            else if (this.provider === 'claude') {
+                rawResponse = await this.callClaude(prompt);
+            }
+            else if (this.provider === 'deepseek') {
+                rawResponse = await this.callOpenAiCompatible('https://api.deepseek.com', 'deepseek-chat', prompt);
+            }
+            else if (this.provider === 'openai') {
+                rawResponse = await this.callOpenAiCompatible('https://api.openai.com/v1', 'gpt-4o-mini', prompt);
+            }
+            else {
+                core.warning(`Unsupported AI provider for remediation: ${this.provider}`);
+                return null;
+            }
+            if (!rawResponse)
+                return null;
+            return this.extractSuggestionCode(rawResponse);
+        }
+        catch (error) {
+            core.warning(`AI Remediation error with ${this.provider}: ${String(error)}`);
+            return null;
+        }
+    }
+    resolveApiKey(provider) {
+        switch (provider) {
+            case 'gemini':
+                return process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '';
+            case 'claude':
+                return process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY || '';
+            case 'deepseek':
+                return process.env.DEEPSEEK_API_KEY || '';
+            case 'openai':
+                return process.env.OPENAI_API_KEY || '';
+            default:
+                return '';
+        }
+    }
+    buildPrompt(finding, context) {
+        return [
+            'You are an automated secure code remediation assistant.',
+            `Vulnerability Detected: ${finding.title} (${finding.cwe || 'CWE'})`,
+            `Severity: ${finding.severity}`,
+            `File: ${finding.file} at line ${finding.line}`,
+            `Description: ${finding.description}`,
+            `Standard Remediation: ${finding.remediation}`,
+            '',
+            'Vulnerable Snippet:',
+            finding.snippet || '',
+            '',
+            context ? `Surrounding Context:\n${context}\n` : '',
+            'Provide a direct, production-ready replacement for ONLY the vulnerable line or minimal code block.',
+            'Wrap your replacement inside a GitHub suggested change block:',
+            '```suggestion',
+            '<replacement code here>',
+            '```',
+            'Do not include any explanations, prose, or commentary outside the suggestion block.'
+        ].join('\n');
+    }
+    async callGemini(prompt) {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${this.apiKey}`;
+        const payload = {
+            contents: [{ role: 'user', parts: [{ text: prompt }] }],
+            generationConfig: { temperature: 0.2, maxOutputTokens: 1024 }
+        };
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+        try {
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+                signal: controller.signal
+            });
+            if (!response.ok) {
+                const text = await response.text();
+                throw new Error(`Gemini HTTP ${response.status}: ${text}`);
+            }
+            const data = await response.json();
+            return data?.candidates?.[0]?.content?.parts?.[0]?.text || null;
+        }
+        finally {
+            clearTimeout(timeout);
+        }
+    }
+    async callClaude(prompt) {
+        const url = 'https://api.anthropic.com/v1/messages';
+        const payload = {
+            model: 'claude-3-5-sonnet-20241022',
+            max_tokens: 1024,
+            temperature: 0.2,
+            messages: [{ role: 'user', content: prompt }]
+        };
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+        try {
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'x-api-key': this.apiKey,
+                    'anthropic-version': '2023-06-01'
+                },
+                body: JSON.stringify(payload),
+                signal: controller.signal
+            });
+            if (!response.ok) {
+                const text = await response.text();
+                throw new Error(`Claude HTTP ${response.status}: ${text}`);
+            }
+            const data = await response.json();
+            return data?.content?.[0]?.text || null;
+        }
+        finally {
+            clearTimeout(timeout);
+        }
+    }
+    async callOpenAiCompatible(baseUrl, model, prompt) {
+        const url = `${baseUrl.replace(/\/+$/, '')}/chat/completions`;
+        const payload = {
+            model,
+            temperature: 0.2,
+            max_tokens: 1024,
+            messages: [{ role: 'user', content: prompt }]
+        };
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+        try {
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${this.apiKey}`
+                },
+                body: JSON.stringify(payload),
+                signal: controller.signal
+            });
+            if (!response.ok) {
+                const text = await response.text();
+                throw new Error(`${model} HTTP ${response.status}: ${text}`);
+            }
+            const data = await response.json();
+            return data?.choices?.[0]?.message?.content || null;
+        }
+        finally {
+            clearTimeout(timeout);
+        }
+    }
+    extractSuggestionCode(raw) {
+        if (!raw)
+            return null;
+        const match = raw.match(/```suggestion\r?\n([\s\S]*?)\r?\n```/);
+        if (match && match[1] !== undefined) {
+            return match[1].trimEnd();
+        }
+        const codeBlockMatch = raw.match(/```(?:[a-zA-Z0-9_\-]+)?\r?\n([\s\S]*?)\r?\n```/);
+        if (codeBlockMatch && codeBlockMatch[1] !== undefined) {
+            return codeBlockMatch[1].trimEnd();
+        }
+        const trimmed = raw.trim();
+        if (trimmed && !trimmed.includes('```')) {
+            return trimmed;
+        }
+        return null;
+    }
+}
+
 ;// CONCATENATED MODULE: ./src/reporter/markdown.ts
 function formatSummaryComment(scanResult, failOn, isBlocked) {
     const { summary, findings, totalFilesScanned } = scanResult;
@@ -32306,6 +32493,13 @@ function formatInlineComment(finding) {
         lines.push('**Vulnerable Line:**');
         lines.push('```');
         lines.push(finding.snippet);
+        lines.push('```');
+        lines.push('');
+    }
+    if (finding.suggestedPatch) {
+        lines.push('**AI Suggested Fix (Click "Commit suggestion" to apply):**');
+        lines.push('```suggestion');
+        lines.push(finding.suggestedPatch);
         lines.push('```');
         lines.push('');
     }
@@ -32451,6 +32645,7 @@ class PrCommenter {
 
 
 
+
 const src_SEVERITY_RANKS = {
     CRITICAL: 4,
     HIGH: 3,
@@ -32469,6 +32664,7 @@ async function run() {
         core.info(`Commit SHA: ${sha}`);
         core.info(`Fail-On Threshold: ${config.failOn}`);
         core.info(`Only Diff: ${config.onlyDiff}`);
+        core.info(`AI Remediation: ${config.aiRemediation ? config.provider : 'disabled'}`);
         const prNumber = github.context.payload.pull_request?.number;
         const prHeadSha = github.context.payload.pull_request?.head?.sha || sha;
         const modifiedFilesMap = new Map();
@@ -32499,6 +32695,25 @@ async function run() {
         });
         core.info(`Scanned ${scanResult.totalFilesScanned} file(s). Found ${scanResult.findings.length} issue(s).`);
         core.info(`Severity Breakdown: [CRITICAL: ${scanResult.summary.critical}] [HIGH: ${scanResult.summary.high}] [MEDIUM: ${scanResult.summary.medium}] [LOW: ${scanResult.summary.low}]`);
+        if (config.aiRemediation && scanResult.findings.length > 0) {
+            core.info(`Running AI Remediation using provider '${config.provider}'...`);
+            const remediationEngine = new RemediationEngine({
+                provider: config.provider,
+                apiKey: config.apiKey
+            });
+            for (const finding of scanResult.findings) {
+                try {
+                    const patch = await remediationEngine.generatePatch(finding);
+                    if (patch) {
+                        finding.suggestedPatch = patch;
+                        core.info(`Generated AI fix for ${finding.file}:${finding.line} (${finding.ruleId})`);
+                    }
+                }
+                catch (err) {
+                    core.warning(`Failed to generate AI fix for ${finding.file}:${finding.line}: ${String(err)}`);
+                }
+            }
+        }
         core.setOutput('findings-count', scanResult.summary.total.toString());
         core.setOutput('critical-count', scanResult.summary.critical.toString());
         core.setOutput('high-count', scanResult.summary.high.toString());

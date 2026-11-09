@@ -72,6 +72,14 @@ export function formatInlineComment(finding: VulnerabilityFinding): string {
     lines.push('');
   }
 
+  if (finding.suggestedPatch) {
+    lines.push('**AI Suggested Fix (Click "Commit suggestion" to apply):**');
+    lines.push('```suggestion');
+    lines.push(finding.suggestedPatch);
+    lines.push('```');
+    lines.push('');
+  }
+
   lines.push('**Recommended Remediation:**');
   lines.push(finding.remediation || 'Apply input validation and secure coding practices.');
   lines.push('');
