@@ -13,6 +13,7 @@
   <a href="https://github.com/sl4de0day/wide-cli">Wide CLI</a> ·
   <a href="https://github.com/sl4de0day/wide-app">Wide App</a> ·
   <a href="https://github.com/sl4de0day/wide-sdk">Wide SDK</a> ·
+  <a href="https://github.com/sl4de0day/wide-rules">Wide Rules</a> ·
   <a href="LICENSE">License</a>
 </p>
 
