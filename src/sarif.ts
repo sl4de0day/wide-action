@@ -147,7 +147,7 @@ export function generateSarifReport(findings: VulnerabilityFinding[]): SarifRepo
         tool: {
           driver: {
             name: 'Wide Security',
-            version: '1.0.0',
+            version: '0.191126',
             informationUri: 'https://github.com/sl4de0day/wide-action',
             rules: Array.from(rulesMap.values())
           }
