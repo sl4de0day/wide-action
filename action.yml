@@ -1,0 +1,55 @@
+name: 'Wide Action'
+description: 'Autonomous PR Security Auditor and CI/CD Gate for the Wide Ecosystem'
+author: 'sl4de0day'
+inputs:
+  github-token:
+    description: 'GitHub token for PR comments, check runs, and reviews'
+    required: true
+    default: ${{ github.token }}
+  fail-on:
+    description: 'Vulnerability severity threshold to fail CI (CRITICAL, HIGH, MEDIUM, LOW, NEVER)'
+    required: false
+    default: 'HIGH'
+  only-diff:
+    description: 'Scan only modified files and changed line hunks in the pull request'
+    required: false
+    default: 'true'
+  ai-remediation:
+    description: 'Generate automated AI code fixes and review suggestions'
+    required: false
+    default: 'false'
+  provider:
+    description: 'AI model provider for code remediation (gemini, claude, deepseek, openai)'
+    required: false
+    default: 'gemini'
+  api-key:
+    description: 'API key for the selected AI provider'
+    required: false
+    default: ''
+  sarif:
+    description: 'Generate SARIF 2.1.0 report for GitHub Advanced Security'
+    required: false
+    default: 'true'
+  output-path:
+    description: 'File path to write the SARIF report'
+    required: false
+    default: 'wide-results.sarif'
+outputs:
+  findings-count:
+    description: 'Total number of detected vulnerabilities'
+  critical-count:
+    description: 'Number of critical vulnerabilities'
+  high-count:
+    description: 'Number of high vulnerabilities'
+  medium-count:
+    description: 'Number of medium vulnerabilities'
+  low-count:
+    description: 'Number of low vulnerabilities'
+  sarif-path:
+    description: 'Path to generated SARIF report'
+runs:
+  using: 'node20'
+  main: 'dist/index.js'
+branding:
+  icon: 'shield'
+  color: 'blue'

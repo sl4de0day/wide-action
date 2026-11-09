@@ -1,0 +1,39 @@
+{
+  "name": "wide-action",
+  "version": "1.0.0",
+  "description": "Autonomous PR Security Auditor and CI/CD Gate for the Wide Ecosystem",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "ncc build src/index.ts -o dist --source-map --license licenses.txt",
+    "compile": "tsc",
+    "test": "tsc && node --test lib/test/**/*.test.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sl4de0day/wide-action.git"
+  },
+  "keywords": [
+    "actions",
+    "security",
+    "sast",
+    "vulnerability-scanner",
+    "code-review",
+    "pull-request",
+    "devsecops",
+    "appsec",
+    "wide"
+  ],
+  "author": "sl4de0day",
+  "license": "MIT",
+  "dependencies": {
+    "@actions/core": "^1.11.1",
+    "@actions/exec": "^1.1.1",
+    "@actions/github": "^6.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.17.0",
+    "@vercel/ncc": "^0.38.3",
+    "typescript": "^5.7.2"
+  }
+}
