@@ -65,7 +65,7 @@ jobs:
           fetch-depth: 0
 
       - name: Run Wide Security Action
-        uses: sl4de0day/wide-action@v0.191126
+        uses: sl4de0day/wide-action@v0.291126
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           fail-on: HIGH
@@ -77,7 +77,7 @@ jobs:
 
 ```yaml
       - name: Run Wide Security Action with AI Remediation
-        uses: sl4de0day/wide-action@v0.191126
+        uses: sl4de0day/wide-action@v0.291126
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           fail-on: HIGH

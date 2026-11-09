@@ -11,6 +11,7 @@ export interface ActionConfig {
   apiKey: string;
   sarif: boolean;
   outputPath: string;
+  rules: string;
 }
 
 export interface VulnerabilityFinding {
@@ -66,4 +67,5 @@ export interface ScanOptions {
   onlyDiff?: boolean;
   modifiedFiles?: Map<string, Set<number>>;
   minSeverity?: SeverityLevel | 'ALL';
+  rules?: any[];
 }

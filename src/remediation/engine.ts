@@ -1,5 +1,6 @@
 import * as core from '@actions/core';
 import { VulnerabilityFinding } from '../types.js';
+import { WeightedScorer, Criterion, Commitment } from './decision.js';
 
 export interface RemediationOptions {
   provider: string;
@@ -222,5 +223,14 @@ export class RemediationEngine {
     }
 
     return null;
+  }
+
+  public scoreCandidatePatch(patch: string, originalSnippet: string): number {
+    const scorer = new WeightedScorer(
+      new Criterion(0.5, () => (patch.trim().length > 0 && patch !== originalSnippet ? 1.0 : 0.0)),
+      new Criterion(0.3, () => (patch.length < 2000 ? 1.0 : Math.max(0.0, 1.0 - (patch.length - 2000) / 2000))),
+      new Criterion(0.2, () => (!patch.includes("TODO") && !patch.includes("FIXME") ? 1.0 : 0.0))
+    );
+    return scorer.score(0);
   }
 }

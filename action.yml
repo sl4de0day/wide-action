@@ -34,6 +34,10 @@ inputs:
     description: 'File path to write the SARIF report'
     required: false
     default: 'wide-results.sarif'
+  rules:
+    description: 'Rule source to load (embedded, latest, or path to rules.json)'
+    required: false
+    default: 'embedded'
 outputs:
   findings-count:
     description: 'Total number of detected vulnerabilities'

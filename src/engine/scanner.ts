@@ -59,6 +59,7 @@ export class SecurityScanner {
   public async scan(options: ScanOptions = {}): Promise<ScanResult> {
     const minSeverity = options.minSeverity || 'LOW';
     const minRank = minSeverity === 'ALL' ? 0 : SEVERITY_RANKS[minSeverity] || 1;
+    const activeRules: readonly SecurityRule[] = (options.rules && options.rules.length > 0) ? options.rules : SECURITY_RULES;
     const findings: VulnerabilityFinding[] = [];
     let scannedFilesCount = 0;
 
@@ -70,7 +71,7 @@ export class SecurityScanner {
         if (!existsSync(fullPath)) continue;
 
         scannedFilesCount++;
-        this.scanSingleFile(fullPath, normalizedRel, changedLines, minRank, findings);
+        this.scanSingleFile(fullPath, normalizedRel, changedLines, minRank, activeRules, findings);
       }
     } else {
       const allFiles = this.collectWorkspaceFiles(this.workspaceDir);
@@ -78,7 +79,7 @@ export class SecurityScanner {
 
       for (const fullPath of allFiles) {
         const relPath = relative(this.workspaceDir, fullPath).replace(/\\/g, '/');
-        this.scanSingleFile(fullPath, relPath, undefined, minRank, findings);
+        this.scanSingleFile(fullPath, relPath, undefined, minRank, activeRules, findings);
       }
     }
 
@@ -103,6 +104,7 @@ export class SecurityScanner {
     relPath: string,
     changedLines: Set<number> | undefined,
     minRank: number,
+    rules: readonly SecurityRule[],
     findings: VulnerabilityFinding[]
   ): void {
     const ext = extname(fullPath).toLowerCase();
@@ -116,7 +118,7 @@ export class SecurityScanner {
     }
 
     const lines = content.split('\n');
-    const applicableRules = SECURITY_RULES.filter(r =>
+    const applicableRules = rules.filter(r =>
       r.languages.includes('all') || r.languages.includes(lang)
     );
 

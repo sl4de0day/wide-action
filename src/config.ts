@@ -35,6 +35,7 @@ export function getConfig(): ActionConfig {
   const apiKey = core.getInput('api-key', { required: false }) || '';
   const sarifRaw = core.getInput('sarif', { required: false }) || 'true';
   const outputPath = (core.getInput('output-path', { required: false }) || 'wide-results.sarif').trim();
+  const rules = (core.getInput('rules', { required: false }) || 'embedded').trim();
 
   return {
     githubToken,
@@ -44,6 +45,7 @@ export function getConfig(): ActionConfig {
     provider,
     apiKey,
     sarif: parseBoolean(sarifRaw, true),
-    outputPath
+    outputPath,
+    rules
   };
 }

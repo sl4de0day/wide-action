@@ -31752,6 +31752,7 @@ function getConfig() {
     const apiKey = core.getInput('api-key', { required: false }) || '';
     const sarifRaw = core.getInput('sarif', { required: false }) || 'true';
     const outputPath = (core.getInput('output-path', { required: false }) || 'wide-results.sarif').trim();
+    const rules = (core.getInput('rules', { required: false }) || 'embedded').trim();
     return {
         githubToken,
         failOn: parseFailOn(failOnRaw),
@@ -31760,7 +31761,8 @@ function getConfig() {
         provider,
         apiKey,
         sarif: parseBoolean(sarifRaw, true),
-        outputPath
+        outputPath,
+        rules
     };
 }
 
@@ -32145,6 +32147,7 @@ class SecurityScanner {
     async scan(options = {}) {
         const minSeverity = options.minSeverity || 'LOW';
         const minRank = minSeverity === 'ALL' ? 0 : SEVERITY_RANKS[minSeverity] || 1;
+        const activeRules = (options.rules && options.rules.length > 0) ? options.rules : SECURITY_RULES;
         const findings = [];
         let scannedFilesCount = 0;
         if (options.onlyDiff && options.modifiedFiles && options.modifiedFiles.size > 0) {
@@ -32154,7 +32157,7 @@ class SecurityScanner {
                 if (!(0,external_node_fs_namespaceObject.existsSync)(fullPath))
                     continue;
                 scannedFilesCount++;
-                this.scanSingleFile(fullPath, normalizedRel, changedLines, minRank, findings);
+                this.scanSingleFile(fullPath, normalizedRel, changedLines, minRank, activeRules, findings);
             }
         }
         else {
@@ -32162,7 +32165,7 @@ class SecurityScanner {
             scannedFilesCount = allFiles.length;
             for (const fullPath of allFiles) {
                 const relPath = (0,external_node_path_namespaceObject.relative)(this.workspaceDir, fullPath).replace(/\\/g, '/');
-                this.scanSingleFile(fullPath, relPath, undefined, minRank, findings);
+                this.scanSingleFile(fullPath, relPath, undefined, minRank, activeRules, findings);
             }
         }
         const summary = {
@@ -32179,7 +32182,7 @@ class SecurityScanner {
             summary
         };
     }
-    scanSingleFile(fullPath, relPath, changedLines, minRank, findings) {
+    scanSingleFile(fullPath, relPath, changedLines, minRank, rules, findings) {
         const ext = (0,external_node_path_namespaceObject.extname)(fullPath).toLowerCase();
         const lang = EXTENSION_MAP[ext] || 'all';
         let content = '';
@@ -32190,7 +32193,7 @@ class SecurityScanner {
             return;
         }
         const lines = content.split('\n');
-        const applicableRules = SECURITY_RULES.filter(r => r.languages.includes('all') || r.languages.includes(lang));
+        const applicableRules = rules.filter(r => r.languages.includes('all') || r.languages.includes(lang));
         for (let i = 0; i < lines.length; i++) {
             const lineNum = i + 1;
             if (changedLines && !changedLines.has(lineNum)) {
@@ -32250,7 +32253,190 @@ class SecurityScanner {
     }
 }
 
+;// CONCATENATED MODULE: ./src/engine/loader.ts
+
+
+
+
+const REMOTE_RULES_URL = 'https://raw.githubusercontent.com/sl4de0day/wide-rules/main/dist/rules.json';
+class RuleLoader {
+    static async loadRules(source = 'embedded', workspaceDir = process.cwd()) {
+        const trimmed = source.trim();
+        if (trimmed.toLowerCase() === 'latest') {
+            try {
+                core.info(`Fetching latest security rules from ${REMOTE_RULES_URL}...`);
+                const response = await fetch(REMOTE_RULES_URL);
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                const data = await response.json();
+                const list = Array.isArray(data) ? data : (data?.rules || []);
+                const converted = this.parseRulesList(list);
+                if (converted.length > 0) {
+                    core.info(`Successfully loaded ${converted.length} rules dynamically from wide-rules.`);
+                    return converted;
+                }
+            }
+            catch (error) {
+                core.warning(`Failed to fetch latest rules dynamically: ${String(error)}. Falling back to embedded rules.`);
+            }
+            return [...SECURITY_RULES];
+        }
+        if (trimmed.toLowerCase() !== 'embedded') {
+            const fullPath = (0,external_node_path_namespaceObject.resolve)(workspaceDir, trimmed);
+            if ((0,external_node_fs_namespaceObject.existsSync)(fullPath)) {
+                try {
+                    const raw = (0,external_node_fs_namespaceObject.readFileSync)(fullPath, 'utf8');
+                    const data = JSON.parse(raw);
+                    const list = Array.isArray(data) ? data : (data?.rules || []);
+                    const converted = this.parseRulesList(list);
+                    if (converted.length > 0) {
+                        core.info(`Loaded ${converted.length} custom rules from ${trimmed}.`);
+                        return converted;
+                    }
+                }
+                catch (err) {
+                    core.warning(`Failed to parse custom rules from ${trimmed}: ${String(err)}. Using embedded rules.`);
+                }
+            }
+            else {
+                core.warning(`Custom rules path not found: ${trimmed}. Using embedded rules.`);
+            }
+        }
+        return [...SECURITY_RULES];
+    }
+    static parseRulesList(list) {
+        const result = [];
+        for (const item of list) {
+            if (!item.id || !item.pattern)
+                continue;
+            try {
+                result.push({
+                    id: item.id,
+                    cwe: item.cwe || 'N/A',
+                    category: item.category || 'General Security',
+                    severity: item.severity || 'MEDIUM',
+                    languages: item.languages || ['all'],
+                    pattern: new RegExp(item.pattern, 'i'),
+                    sourcePattern: item['source-pattern'] ? new RegExp(item['source-pattern'], 'i') : undefined,
+                    message: item.message || '',
+                    remediation: item.remediation || ''
+                });
+            }
+            catch {
+                continue;
+            }
+        }
+        return result;
+    }
+}
+
+;// CONCATENATED MODULE: ./src/remediation/decision.ts
+class Criterion {
+    weight;
+    term;
+    constructor(weight, term) {
+        if (weight < 0.0)
+            throw new RangeError("weight cannot be negative");
+        if (!term)
+            throw new TypeError("term cannot be null");
+        this.weight = weight;
+        this.term = term;
+    }
+}
+class WeightedScorer {
+    criteria;
+    totalWeight;
+    constructor(...criteria) {
+        if (!criteria || criteria.length === 0)
+            throw new TypeError("criteria cannot be null or empty");
+        this.criteria = [...criteria];
+        let m = 0.0;
+        for (const c of this.criteria) {
+            if (!c || !c.term)
+                throw new TypeError("criterion or term cannot be null");
+            m += c.weight;
+        }
+        if (m <= 0.0)
+            throw new RangeError("total weight must be positive");
+        this.totalWeight = m;
+    }
+    score(candidate) {
+        let s = 0.0;
+        for (const c of this.criteria) {
+            let f = c.term(candidate);
+            if (f < 0.0)
+                f = 0.0;
+            else if (f > 1.0)
+                f = 1.0;
+            s += c.weight * f;
+        }
+        return s / this.totalWeight;
+    }
+    trySelect(candidateCount, threshold = 0.5, bias = 1.0) {
+        if (candidateCount < 1 || bias <= 0.0)
+            return { success: false, best: -1, score: 0.0 };
+        const effectiveThreshold = threshold / bias;
+        let bestIndex = -1;
+        let bestScore = -1.0;
+        for (let i = 0; i < candidateCount; i++) {
+            const s = this.score(i);
+            if (s > bestScore) {
+                bestScore = s;
+                bestIndex = i;
+            }
+        }
+        if (bestScore >= effectiveThreshold && bestIndex >= 0) {
+            return { success: true, best: bestIndex, score: bestScore };
+        }
+        return { success: false, best: bestIndex, score: bestScore };
+    }
+}
+class Commitment {
+    lifetime;
+    lockWindow;
+    adoptedAt;
+    currentScore;
+    hasCommitment;
+    constructor(lifetime, lockWindow) {
+        if (lifetime <= 0.0)
+            throw new RangeError("lifetime must be positive");
+        if (lockWindow < 0.0)
+            throw new RangeError("lockWindow cannot be negative");
+        this.lifetime = lifetime;
+        this.lockWindow = lockWindow;
+        this.adoptedAt = -Infinity;
+        this.currentScore = 0.0;
+        this.hasCommitment = false;
+    }
+    get score() {
+        return this.currentScore;
+    }
+    get committed() {
+        return this.hasCommitment;
+    }
+    isExpired(now) {
+        return !this.hasCommitment || now - this.adoptedAt >= this.lifetime;
+    }
+    isLocked(now) {
+        return this.hasCommitment && now - this.adoptedAt < this.lockWindow;
+    }
+    shouldReplace(challengerScore, margin, now) {
+        if (this.isExpired(now))
+            return true;
+        if (this.isLocked(now))
+            return false;
+        return challengerScore >= this.currentScore + margin;
+    }
+    adopt(score, now) {
+        this.currentScore = score;
+        this.adoptedAt = now;
+        this.hasCommitment = true;
+    }
+}
+
 ;// CONCATENATED MODULE: ./src/remediation/engine.ts
+
 
 class RemediationEngine {
     provider;
@@ -32434,6 +32620,10 @@ class RemediationEngine {
             return trimmed;
         }
         return null;
+    }
+    scoreCandidatePatch(patch, originalSnippet) {
+        const scorer = new WeightedScorer(new Criterion(0.5, () => (patch.trim().length > 0 && patch !== originalSnippet ? 1.0 : 0.0)), new Criterion(0.3, () => (patch.length < 2000 ? 1.0 : Math.max(0.0, 1.0 - (patch.length - 2000) / 2000))), new Criterion(0.2, () => (!patch.includes("TODO") && !patch.includes("FIXME") ? 1.0 : 0.0)));
+        return scorer.score(0);
     }
 }
 
@@ -32669,9 +32859,10 @@ function severityToProblemSeverity(severity) {
             return 'recommendation';
     }
 }
-function generateSarifReport(findings) {
+function generateSarifReport(findings, customRules) {
     const rulesMap = new Map();
-    for (const rule of SECURITY_RULES) {
+    const rulesToMap = (customRules && customRules.length > 0) ? customRules : SECURITY_RULES;
+    for (const rule of rulesToMap) {
         const cweTag = rule.cwe.toLowerCase();
         rulesMap.set(rule.id, {
             id: rule.id,
@@ -32735,17 +32926,18 @@ function generateSarifReport(findings) {
         ]
     };
 }
-function writeSarifReport(outputPath, findings, workspaceDir = process.cwd()) {
+function writeSarifReport(outputPath, findings, workspaceDir = process.cwd(), customRules) {
     const fullPath = (0,external_node_path_namespaceObject.resolve)(workspaceDir, outputPath);
     const dir = (0,external_node_path_namespaceObject.dirname)(fullPath);
     (0,external_node_fs_namespaceObject.mkdirSync)(dir, { recursive: true });
-    const sarifData = generateSarifReport(findings);
+    const sarifData = generateSarifReport(findings, customRules);
     (0,external_node_fs_namespaceObject.writeFileSync)(fullPath, JSON.stringify(sarifData, null, 2), 'utf8');
     core.info(`Generated SARIF 2.1.0 report at: ${outputPath}`);
     return fullPath;
 }
 
 ;// CONCATENATED MODULE: ./src/index.ts
+
 
 
 
@@ -32797,10 +32989,13 @@ async function run() {
             }
         }
         core.info('Running Wide Security Scanner...');
+        core.info(`Rules Source: ${config.rules}`);
+        const activeRules = await RuleLoader.loadRules(config.rules, process.cwd());
         const scanner = new SecurityScanner(process.cwd());
         const scanResult = await scanner.scan({
             onlyDiff: config.onlyDiff,
-            modifiedFiles: modifiedFilesMap
+            modifiedFiles: modifiedFilesMap,
+            rules: activeRules
         });
         core.info(`Scanned ${scanResult.totalFilesScanned} file(s). Found ${scanResult.findings.length} issue(s).`);
         core.info(`Severity Breakdown: [CRITICAL: ${scanResult.summary.critical}] [HIGH: ${scanResult.summary.high}] [MEDIUM: ${scanResult.summary.medium}] [LOW: ${scanResult.summary.low}]`);
@@ -32824,7 +33019,7 @@ async function run() {
             }
         }
         if (config.sarif) {
-            writeSarifReport(config.outputPath, scanResult.findings);
+            writeSarifReport(config.outputPath, scanResult.findings, process.cwd(), activeRules);
             core.setOutput('sarif-path', config.outputPath);
         }
         else {

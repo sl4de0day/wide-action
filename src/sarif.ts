@@ -86,10 +86,14 @@ export function severityToProblemSeverity(
   }
 }
 
-export function generateSarifReport(findings: VulnerabilityFinding[]): SarifReport {
+export function generateSarifReport(
+  findings: VulnerabilityFinding[],
+  customRules?: any[]
+): SarifReport {
   const rulesMap = new Map<string, SarifRule>();
+  const rulesToMap = (customRules && customRules.length > 0) ? customRules : SECURITY_RULES;
 
-  for (const rule of SECURITY_RULES) {
+  for (const rule of rulesToMap) {
     const cweTag = rule.cwe.toLowerCase();
     rulesMap.set(rule.id, {
       id: rule.id,
@@ -161,14 +165,15 @@ export function generateSarifReport(findings: VulnerabilityFinding[]): SarifRepo
 export function writeSarifReport(
   outputPath: string,
   findings: VulnerabilityFinding[],
-  workspaceDir = process.cwd()
+  workspaceDir = process.cwd(),
+  customRules?: any[]
 ): string {
   const fullPath = resolve(workspaceDir, outputPath);
   const dir = dirname(fullPath);
 
   mkdirSync(dir, { recursive: true });
 
-  const sarifData = generateSarifReport(findings);
+  const sarifData = generateSarifReport(findings, customRules);
   writeFileSync(fullPath, JSON.stringify(sarifData, null, 2), 'utf8');
 
   core.info(`Generated SARIF 2.1.0 report at: ${outputPath}`);

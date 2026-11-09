@@ -3,6 +3,7 @@ import * as github from '@actions/github';
 import { getConfig } from './config.js';
 import { getPullRequestDiff, getLocalGitDiff } from './git.js';
 import { SecurityScanner } from './engine/scanner.js';
+import { RuleLoader } from './engine/loader.js';
 import { RemediationEngine } from './remediation/engine.js';
 import { PrCommenter } from './reporter/pr-commenter.js';
 import { writeSarifReport } from './sarif.js';
@@ -55,10 +56,13 @@ export async function run(): Promise<void> {
     }
 
     core.info('Running Wide Security Scanner...');
+    core.info(`Rules Source: ${config.rules}`);
+    const activeRules = await RuleLoader.loadRules(config.rules, process.cwd());
     const scanner = new SecurityScanner(process.cwd());
     const scanResult = await scanner.scan({
       onlyDiff: config.onlyDiff,
-      modifiedFiles: modifiedFilesMap
+      modifiedFiles: modifiedFilesMap,
+      rules: activeRules
     });
 
     core.info(`Scanned ${scanResult.totalFilesScanned} file(s). Found ${scanResult.findings.length} issue(s).`);
@@ -85,7 +89,7 @@ export async function run(): Promise<void> {
     }
 
     if (config.sarif) {
-      writeSarifReport(config.outputPath, scanResult.findings);
+      writeSarifReport(config.outputPath, scanResult.findings, process.cwd(), activeRules);
       core.setOutput('sarif-path', config.outputPath);
     } else {
       core.setOutput('sarif-path', '');
