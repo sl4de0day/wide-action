@@ -54,3 +54,16 @@ export interface ModifiedFileDiff {
   changedLines: Set<number>;
   patch?: string;
 }
+
+export interface ScanResult {
+  totalFilesScanned: number;
+  findings: VulnerabilityFinding[];
+  summary: ScanSummary;
+}
+
+export interface ScanOptions {
+  targetPath?: string;
+  onlyDiff?: boolean;
+  modifiedFiles?: Map<string, Set<number>>;
+  minSeverity?: SeverityLevel | 'ALL';
+}

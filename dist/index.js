@@ -31764,10 +31764,505 @@ function getConfig() {
     };
 }
 
+;// CONCATENATED MODULE: external "node:child_process"
+const external_node_child_process_namespaceObject = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("node:child_process");
+// EXTERNAL MODULE: external "node:util"
+var external_node_util_ = __nccwpck_require__(7975);
+;// CONCATENATED MODULE: ./src/git.ts
+
+
+
+const execAsync = (0,external_node_util_.promisify)(external_node_child_process_namespaceObject.exec);
+const HUNK_REGEX = /^@@\s+-(?<oldStart>\d+)(?:,(?<oldLines>\d+))?\s+\+(?<newStart>\d+)(?:,(?<newLines>\d+))?\s+@@/;
+function parsePatch(patch) {
+    const changedLines = new Set();
+    if (!patch)
+        return changedLines;
+    const lines = patch.split('\n');
+    let currentNewLine = 0;
+    let inHunk = false;
+    for (const line of lines) {
+        const match = line.match(HUNK_REGEX);
+        if (match && match.groups) {
+            inHunk = true;
+            currentNewLine = parseInt(match.groups.newStart, 10);
+            continue;
+        }
+        if (!inHunk)
+            continue;
+        if (line.startsWith('+') && !line.startsWith('+++')) {
+            changedLines.add(currentNewLine);
+            currentNewLine++;
+        }
+        else if (line.startsWith('-') && !line.startsWith('---')) {
+            continue;
+        }
+        else if (line.startsWith(' ') || line === '') {
+            currentNewLine++;
+        }
+    }
+    return changedLines;
+}
+function parseUnifiedDiff(rawDiff) {
+    const result = [];
+    if (!rawDiff.trim())
+        return result;
+    const fileChunks = rawDiff.split(/^diff --git\s+/m).filter(Boolean);
+    for (const chunk of fileChunks) {
+        const lines = chunk.split('\n');
+        let filename = '';
+        for (const line of lines) {
+            if (line.startsWith('+++ b/')) {
+                filename = line.slice(6).trim();
+                break;
+            }
+        }
+        if (!filename) {
+            const match = lines[0].match(/a\/(.+?)\s+b\/(.+)/);
+            if (match) {
+                filename = match[2].trim();
+            }
+        }
+        if (!filename || filename === '/dev/null')
+            continue;
+        const changedLines = parsePatch(chunk);
+        let additions = 0;
+        let deletions = 0;
+        for (const line of lines) {
+            if (line.startsWith('+') && !line.startsWith('+++'))
+                additions++;
+            if (line.startsWith('-') && !line.startsWith('---'))
+                deletions++;
+        }
+        result.push({
+            filename,
+            status: deletions > 0 && additions === 0 ? 'removed' : additions > 0 && deletions === 0 ? 'added' : 'modified',
+            additions,
+            deletions,
+            changedLines,
+            patch: chunk
+        });
+    }
+    return result;
+}
+async function getPullRequestDiff(octokit, owner, repo, pullNumber) {
+    try {
+        const files = await octokit.paginate(octokit.rest.pulls.listFiles, {
+            owner,
+            repo,
+            pull_number: pullNumber,
+            per_page: 100
+        });
+        return files.map(file => ({
+            filename: file.filename,
+            status: file.status,
+            additions: file.additions,
+            deletions: file.deletions,
+            changedLines: parsePatch(file.patch || ''),
+            patch: file.patch
+        }));
+    }
+    catch (error) {
+        core.warning(`Failed to fetch pull request files via GitHub API: ${String(error)}`);
+        return getLocalGitDiff();
+    }
+}
+async function getLocalGitDiff(baseRef) {
+    try {
+        const targetRef = baseRef || 'HEAD~1';
+        const { stdout } = await execAsync(`git diff -U0 ${targetRef} HEAD`);
+        return parseUnifiedDiff(stdout);
+    }
+    catch {
+        try {
+            const { stdout } = await execAsync('git diff -U0 HEAD');
+            return parseUnifiedDiff(stdout);
+        }
+        catch (err) {
+            core.warning(`Failed to extract local git diff: ${String(err)}`);
+            return [];
+        }
+    }
+}
+
+;// CONCATENATED MODULE: external "node:fs"
+const external_node_fs_namespaceObject = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("node:fs");
+;// CONCATENATED MODULE: external "node:path"
+const external_node_path_namespaceObject = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("node:path");
+;// CONCATENATED MODULE: ./src/engine/rules.ts
+const SECURITY_RULES = [
+    {
+        id: 'WIDE-SEC-001',
+        cwe: 'CWE-89',
+        category: 'SQL Injection',
+        severity: 'CRITICAL',
+        languages: ['js', 'ts', 'py', 'php', 'java', 'cs', 'go', 'rb'],
+        pattern: /(?:SELECT|INSERT|UPDATE|DELETE|FROM|WHERE).*?(?:\+|%s|\$|\.format\(|f['"]).*?(?:req\.|params|body|query|input|\$_(?:GET|POST|REQUEST)|request\.)/i,
+        sourcePattern: /(?:req\.(?:query|params|body)|request\.(?:args|form|GET|POST)|\$_(?:GET|POST))/i,
+        message: 'Dynamic SQL query constructed with unescaped user input.',
+        remediation: 'Use parameterized queries or prepared statements (e.g. pool.query(\'SELECT * FROM users WHERE id = $1\', [id])).'
+    },
+    {
+        id: 'WIDE-SEC-002',
+        cwe: 'CWE-78',
+        category: 'Command Injection',
+        severity: 'CRITICAL',
+        languages: ['js', 'ts', 'py', 'php', 'java', 'cs', 'go', 'rb'],
+        pattern: /(?:child_process|exec|execSync|spawn|subprocess\.Popen|subprocess\.run|os\.system|shell_exec|system|passthru|Runtime\.getRuntime\(\)\.exec)\s*\(\s*(?:`[^`]*\$\{|['"].*?\+\s*|f['"][^'"]*\{)/i,
+        sourcePattern: /(?:req\.|request\.|input|param|\$_)/i,
+        message: 'System command execution sink receives unescaped parameters.',
+        remediation: 'Avoid passing user input to shell commands. Use execFile or spawn with argument arrays without invoking a subshell.'
+    },
+    {
+        id: 'WIDE-SEC-003',
+        cwe: 'CWE-79',
+        category: 'Cross-Site Scripting (XSS)',
+        severity: 'HIGH',
+        languages: ['js', 'ts', 'php'],
+        pattern: /(?:innerHTML|outerHTML|document\.write|dangerouslySetInnerHTML|v-html|\becho\s+\$_(?:GET|POST)|print\s+\$_)\s*(?:=|\()\s*(?:.*?\b(?:query|param|body|req|location|search|URLSearchParams)\b)/i,
+        message: 'Unsanitized user input rendered directly into the DOM or HTML output.',
+        remediation: 'Use textContent, framework-native safe bindings, or sanitize HTML using DOMPurify before rendering.'
+    },
+    {
+        id: 'WIDE-SEC-004',
+        cwe: 'CWE-918',
+        category: 'Server-Side Request Forgery (SSRF)',
+        severity: 'HIGH',
+        languages: ['js', 'ts', 'py', 'php', 'go', 'java'],
+        pattern: /(?:fetch|axios\.(?:get|post|request)|http\.get|urllib\.request|requests\.(?:get|post)|curl_exec)\s*\(\s*(?:req\.|params|query|body|request\.)/i,
+        message: 'Outbound HTTP request targeting a user-supplied URL without destination validation.',
+        remediation: 'Validate destination URLs against an explicit domain allowlist and block private IP ranges.'
+    },
+    {
+        id: 'WIDE-SEC-005',
+        cwe: 'CWE-22',
+        category: 'Path Traversal',
+        severity: 'HIGH',
+        languages: ['js', 'ts', 'py', 'php', 'java', 'go'],
+        pattern: /(?:readFile|readFileSync|createReadStream|open|file_get_contents|readfile|FileInputStream)\s*\(\s*(?:.*?path\.join.*?req\.|.*?\+\s*(?:req\.|params|query|\$_)|f['"].*?\{request)/i,
+        message: 'File system access with untrusted path concatenation vulnerable to directory traversal.',
+        remediation: 'Resolve the path with path.resolve() and verify that it starts with the intended base directory.'
+    },
+    {
+        id: 'WIDE-SEC-006',
+        cwe: 'CWE-502',
+        category: 'Insecure Deserialization',
+        severity: 'CRITICAL',
+        languages: ['js', 'ts', 'py', 'php', 'java'],
+        pattern: /(?:pickle\.loads|yaml\.load\([^,)]+\)|unserialize\s*\(|node-serialize|serialize\.unserialize|XMLDecoder|ObjectInputStream)/i,
+        message: 'Untrusted deserialization can lead to arbitrary code execution.',
+        remediation: 'Never deserialize untrusted input with unsafe serializers. Use JSON.parse or safe_load in PyYAML.'
+    },
+    {
+        id: 'WIDE-SEC-007',
+        cwe: 'CWE-611',
+        category: 'XML External Entity (XXE)',
+        severity: 'HIGH',
+        languages: ['js', 'ts', 'py', 'php', 'java'],
+        pattern: /(?:xml2js|DOMParser|SimpleXMLElement|libxml_disable_entity_loader\s*\(\s*false|DocumentBuilderFactory.*?setFeature.*?external-general-entities.*?true)/i,
+        message: 'XML parser configured without disabling external entity resolution.',
+        remediation: 'Disable external DTDs and external entity expansion.'
+    },
+    {
+        id: 'WIDE-SEC-008',
+        cwe: 'CWE-798',
+        category: 'Hardcoded Secret',
+        severity: 'HIGH',
+        languages: ['all'],
+        pattern: /(?:(?:api_?key|secret|password|access_?token|jwt_?secret|private_?key)\s*[:=]\s*['"][a-zA-Z0-9_\-\.]{16,}['"]|AKIA[0-9A-Z]{16}|ghp_[a-zA-Z0-9]{36}|AIza[0-9A-Za-z\-_]{35})/i,
+        message: 'High-entropy API token, private key, or credential hardcoded in source.',
+        remediation: 'Extract secrets to environment variables or an external secret manager.'
+    },
+    {
+        id: 'WIDE-SEC-009',
+        cwe: 'CWE-327',
+        category: 'Broken Cryptography',
+        severity: 'MEDIUM',
+        languages: ['js', 'ts', 'py', 'php', 'java', 'cs', 'go'],
+        pattern: /(?:createHash\s*\(\s*['"](?:md5|sha1)['"]|hashlib\.(?:md5|sha1)|MD5\.Create|DES|RC4|crypto\.createCipheriv\s*\(\s*['"][^'"]*ecb)/i,
+        message: 'Collision-prone or deprecated cryptographic algorithm (MD5/SHA1/DES/ECB mode).',
+        remediation: 'Use SHA-256 or SHA-512 for integrity, bcrypt/argon2 for passwords, and AES-256-GCM for encryption.'
+    },
+    {
+        id: 'WIDE-SEC-010',
+        cwe: 'CWE-94',
+        category: 'Code Injection (eval)',
+        severity: 'CRITICAL',
+        languages: ['js', 'ts', 'py', 'php'],
+        pattern: /(?:\beval\s*\(|new\s+Function\s*\(|setTimeout\s*\(\s*['"`]|setInterval\s*\(\s*['"`])/i,
+        sourcePattern: /(?:req\.|params|query|input|\$_)/i,
+        message: 'Dynamic code evaluation sink called with user-influenced string.',
+        remediation: 'Remove eval and dynamic Function calls. Refactor logic to use structured mappings or data structures.'
+    },
+    {
+        id: 'WIDE-SEC-011',
+        cwe: 'CWE-1333',
+        category: 'Regular Expression Denial of Service (ReDoS)',
+        severity: 'MEDIUM',
+        languages: ['js', 'ts', 'py', 'java'],
+        pattern: /\/(?:[a-zA-Z0-9_]*\+)+[a-zA-Z0-9_]*\+/i,
+        message: 'Catastrophic backtracking vulnerability detected in nested regex quantifier.',
+        remediation: 'Refactor regex to eliminate overlapping nested repetitions, or enforce string length limits before matching.'
+    },
+    {
+        id: 'WIDE-SEC-012',
+        cwe: 'CWE-1321',
+        category: 'Prototype Pollution',
+        severity: 'HIGH',
+        languages: ['js', 'ts'],
+        pattern: /(?:__proto__|constructor\s*\[\s*['"]prototype['"]\]|Object\.assign\s*\(\s*\{\}\s*,\s*(?:req\.|body|params)|merge\s*\([^,]+,\s*(?:req\.|body))/i,
+        message: 'Potential prototype pollution via unsafe recursive object merging.',
+        remediation: 'Validate keys against __proto__ and constructor, or use Object.create(null).'
+    },
+    {
+        id: 'WIDE-SEC-013',
+        cwe: 'CWE-943',
+        category: 'NoSQL Injection',
+        severity: 'CRITICAL',
+        languages: ['js', 'ts', 'py'],
+        pattern: /(?:\.find|\.findOne|\.deleteMany|\.updateMany)\s*\(\s*(?:req\.(?:body|query|params)|\{[^}]*\$(?:where|ne|gt|regex))/i,
+        message: 'NoSQL query structure accepts raw user object without type coercion.',
+        remediation: 'Enforce strict schema validation and sanitize inputs so operator objects cannot be injected.'
+    },
+    {
+        id: 'WIDE-SEC-014',
+        cwe: 'CWE-601',
+        category: 'Open Redirect',
+        severity: 'MEDIUM',
+        languages: ['js', 'ts', 'py', 'php'],
+        pattern: /(?:res\.redirect|redirect|header\s*\(\s*['"]Location:)\s*\(\s*(?:req\.|params|query|request\.)/i,
+        message: 'HTTP redirection destination is controlled by untrusted request parameter.',
+        remediation: 'Use relative redirect paths or validate destinations against a strict allowlist of authorized hostnames.'
+    },
+    {
+        id: 'WIDE-SEC-015',
+        cwe: 'CWE-384',
+        category: 'Session Fixation',
+        severity: 'MEDIUM',
+        languages: ['js', 'ts', 'py', 'php'],
+        pattern: /(?:session\.regenerate|session_regenerate_id)\s*===?\s*false|req\.session\.regenerate\s*\(\s*function\s*\(\)\s*\{\s*\}\s*\)/i,
+        message: 'Session identifier not refreshed upon privilege escalation or authentication.',
+        remediation: 'Always regenerate session identifiers upon login using req.session.regenerate() or session_regenerate_id(true).'
+    },
+    {
+        id: 'WIDE-SEC-016',
+        cwe: 'CWE-639',
+        category: 'Insecure Direct Object Reference (IDOR)',
+        severity: 'HIGH',
+        languages: ['js', 'ts', 'py', 'php', 'java'],
+        pattern: /(?:findById|findByPk|findOne|SELECT.*?WHERE id =)\s*\(\s*req\.params\.id\s*\)(?!.*?(?:userId|ownerId|user\._?id|req\.user))/i,
+        message: 'Database record queried strictly by client-supplied ID without verifying ownership.',
+        remediation: 'Always scope database queries to the authenticated user ID (e.g. { id: req.params.id, userId: req.user.id }).'
+    },
+    {
+        id: 'WIDE-SEC-017',
+        cwe: 'CWE-942',
+        category: 'CORS Misconfiguration',
+        severity: 'MEDIUM',
+        languages: ['js', 'ts', 'py', 'php'],
+        pattern: /(?:Access-Control-Allow-Origin.*?['"]\*['"].*?Access-Control-Allow-Credentials.*?['"]true['"]|cors\s*\(\s*\{\s*origin:\s*true\s*,\s*credentials:\s*true)/i,
+        message: 'Wildcard CORS origin allowed in conjunction with credential sharing.',
+        remediation: 'Never combine Access-Control-Allow-Credentials: true with a wildcard or dynamically reflected origin.'
+    },
+    {
+        id: 'WIDE-SEC-018',
+        cwe: 'CWE-352',
+        category: 'Cross-Site Request Forgery (CSRF)',
+        severity: 'MEDIUM',
+        languages: ['js', 'ts', 'py', 'php'],
+        pattern: /(?:app\.(?:post|put|delete|patch)\s*\([^,]+,\s*(?!.*?csrf).*?\bfunction\b|csrfProtection.*?enabled:\s*false)/i,
+        message: 'State-changing HTTP route registered without apparent CSRF token protection.',
+        remediation: 'Enable SameSite cookies and use CSRF tokens (csurf or double-submit cookie pattern).'
+    },
+    {
+        id: 'WIDE-SEC-019',
+        cwe: 'CWE-330',
+        category: 'Weak Randomness',
+        severity: 'LOW',
+        languages: ['js', 'ts', 'py', 'php', 'java'],
+        pattern: /(?:Math\.random|random\.random|rand\(|mt_rand)\s*\(\s*\).*?(?:token|secret|session|key|nonce|auth|otp)/i,
+        message: 'Pseudorandom number generator used for security-sensitive token generation.',
+        remediation: 'Use cryptographically secure random number generators (crypto.randomBytes() or secrets.token_hex()).'
+    },
+    {
+        id: 'WIDE-SEC-020',
+        cwe: 'CWE-209',
+        category: 'Information Leakage',
+        severity: 'LOW',
+        languages: ['js', 'ts', 'py', 'php', 'java'],
+        pattern: /(?:res\.(?:send|json)\s*\(\s*(?:err\.stack|err\.message|error\.stack)|printStackTrace\s*\(\)|ini_set\s*\(\s*['"]display_errors['"]\s*,\s*['"]1['"]\))/i,
+        message: 'Detailed internal error stack trace or debug information exposed to client.',
+        remediation: 'Log stack traces internally and return generic error responses with error correlation IDs to clients.'
+    }
+];
+
+;// CONCATENATED MODULE: ./src/engine/scanner.ts
+
+
+
+const EXTENSION_MAP = {
+    '.js': 'js',
+    '.jsx': 'js',
+    '.mjs': 'js',
+    '.cjs': 'js',
+    '.ts': 'ts',
+    '.tsx': 'ts',
+    '.py': 'py',
+    '.php': 'php',
+    '.java': 'java',
+    '.cs': 'cs',
+    '.go': 'go',
+    '.rb': 'rb',
+    '.rs': 'rs',
+    '.c': 'c',
+    '.cpp': 'c',
+    '.h': 'c'
+};
+const SEVERITY_RANKS = {
+    CRITICAL: 4,
+    HIGH: 3,
+    MEDIUM: 2,
+    LOW: 1,
+    INFO: 0
+};
+const IGNORED_DIRECTORIES = new Set([
+    'node_modules',
+    '.git',
+    'dist',
+    'build',
+    'vendor',
+    '.next',
+    'target',
+    'coverage',
+    '.gemini',
+    '.vscode'
+]);
+class SecurityScanner {
+    workspaceDir;
+    constructor(workspaceDir = process.cwd()) {
+        this.workspaceDir = (0,external_node_path_namespaceObject.resolve)(workspaceDir);
+    }
+    async scan(options = {}) {
+        const minSeverity = options.minSeverity || 'LOW';
+        const minRank = minSeverity === 'ALL' ? 0 : SEVERITY_RANKS[minSeverity] || 1;
+        const findings = [];
+        let scannedFilesCount = 0;
+        if (options.onlyDiff && options.modifiedFiles && options.modifiedFiles.size > 0) {
+            for (const [rawFilePath, changedLines] of options.modifiedFiles.entries()) {
+                const normalizedRel = rawFilePath.replace(/\\/g, '/');
+                const fullPath = (0,external_node_path_namespaceObject.resolve)(this.workspaceDir, normalizedRel);
+                if (!(0,external_node_fs_namespaceObject.existsSync)(fullPath))
+                    continue;
+                scannedFilesCount++;
+                this.scanSingleFile(fullPath, normalizedRel, changedLines, minRank, findings);
+            }
+        }
+        else {
+            const allFiles = this.collectWorkspaceFiles(this.workspaceDir);
+            scannedFilesCount = allFiles.length;
+            for (const fullPath of allFiles) {
+                const relPath = (0,external_node_path_namespaceObject.relative)(this.workspaceDir, fullPath).replace(/\\/g, '/');
+                this.scanSingleFile(fullPath, relPath, undefined, minRank, findings);
+            }
+        }
+        const summary = {
+            total: findings.length,
+            critical: findings.filter(f => f.severity === 'CRITICAL').length,
+            high: findings.filter(f => f.severity === 'HIGH').length,
+            medium: findings.filter(f => f.severity === 'MEDIUM').length,
+            low: findings.filter(f => f.severity === 'LOW').length,
+            info: findings.filter(f => f.severity === 'INFO').length
+        };
+        return {
+            totalFilesScanned: scannedFilesCount,
+            findings,
+            summary
+        };
+    }
+    scanSingleFile(fullPath, relPath, changedLines, minRank, findings) {
+        const ext = (0,external_node_path_namespaceObject.extname)(fullPath).toLowerCase();
+        const lang = EXTENSION_MAP[ext] || 'all';
+        let content = '';
+        try {
+            content = (0,external_node_fs_namespaceObject.readFileSync)(fullPath, 'utf8');
+        }
+        catch {
+            return;
+        }
+        const lines = content.split('\n');
+        const applicableRules = SECURITY_RULES.filter(r => r.languages.includes('all') || r.languages.includes(lang));
+        for (let i = 0; i < lines.length; i++) {
+            const lineNum = i + 1;
+            if (changedLines && !changedLines.has(lineNum)) {
+                continue;
+            }
+            const lineText = lines[i];
+            if (lineText.length > 1500)
+                continue;
+            for (const rule of applicableRules) {
+                if (SEVERITY_RANKS[rule.severity] < minRank)
+                    continue;
+                if (rule.pattern.test(lineText)) {
+                    let confirmed = true;
+                    if (rule.sourcePattern) {
+                        const windowStart = Math.max(0, i - 15);
+                        const windowText = lines.slice(windowStart, i + 1).join('\n');
+                        confirmed = rule.sourcePattern.test(windowText);
+                    }
+                    if (confirmed) {
+                        findings.push({
+                            id: `${rule.id}-${relPath}-${lineNum}`,
+                            ruleId: rule.id,
+                            cwe: rule.cwe,
+                            title: rule.category,
+                            description: rule.message,
+                            severity: rule.severity,
+                            file: relPath,
+                            line: lineNum,
+                            snippet: lineText.trim(),
+                            remediation: rule.remediation
+                        });
+                    }
+                }
+            }
+        }
+    }
+    collectWorkspaceFiles(dir) {
+        const results = [];
+        if (!(0,external_node_fs_namespaceObject.existsSync)(dir))
+            return results;
+        const entries = (0,external_node_fs_namespaceObject.readdirSync)(dir, { withFileTypes: true });
+        for (const entry of entries) {
+            if (IGNORED_DIRECTORIES.has(entry.name))
+                continue;
+            const fullPath = (0,external_node_path_namespaceObject.join)(dir, entry.name);
+            if (entry.isDirectory()) {
+                results.push(...this.collectWorkspaceFiles(fullPath));
+            }
+            else if (entry.isFile()) {
+                const ext = (0,external_node_path_namespaceObject.extname)(entry.name).toLowerCase();
+                if (ext in EXTENSION_MAP) {
+                    results.push(fullPath);
+                }
+            }
+        }
+        return results;
+    }
+}
+
 ;// CONCATENATED MODULE: ./src/index.ts
 
 
 
+
+
+const src_SEVERITY_RANKS = {
+    CRITICAL: 4,
+    HIGH: 3,
+    MEDIUM: 2,
+    LOW: 1,
+    INFO: 0
+};
 async function run() {
     try {
         const config = getConfig();
@@ -31779,19 +32274,63 @@ async function run() {
         core.info(`Commit SHA: ${sha}`);
         core.info(`Fail-On Threshold: ${config.failOn}`);
         core.info(`Only Diff: ${config.onlyDiff}`);
-        core.info(`SARIF Output: ${config.sarif ? config.outputPath : 'disabled'}`);
-        core.info(`AI Remediation: ${config.aiRemediation ? config.provider : 'disabled'}`);
         const prNumber = github.context.payload.pull_request?.number;
-        if (prNumber) {
-            core.info(`Pull Request: #${prNumber}`);
+        const modifiedFilesMap = new Map();
+        if (config.onlyDiff) {
+            if (prNumber && config.githubToken) {
+                core.info(`Fetching diff for Pull Request #${prNumber}...`);
+                const octokit = github.getOctokit(config.githubToken);
+                const prDiffs = await getPullRequestDiff(octokit, repo.owner, repo.repo, prNumber);
+                for (const file of prDiffs) {
+                    modifiedFilesMap.set(file.filename, file.changedLines);
+                }
+                core.info(`Retrieved ${prDiffs.length} modified file(s) from Pull Request.`);
+            }
+            else {
+                core.info('Detecting local git diff...');
+                const localDiffs = await getLocalGitDiff();
+                for (const file of localDiffs) {
+                    modifiedFilesMap.set(file.filename, file.changedLines);
+                }
+                core.info(`Detected ${localDiffs.length} modified file(s) via git diff.`);
+            }
         }
-        core.setOutput('findings-count', '0');
-        core.setOutput('critical-count', '0');
-        core.setOutput('high-count', '0');
-        core.setOutput('medium-count', '0');
-        core.setOutput('low-count', '0');
+        core.info('Running Wide Security Scanner...');
+        const scanner = new SecurityScanner(process.cwd());
+        const scanResult = await scanner.scan({
+            onlyDiff: config.onlyDiff,
+            modifiedFiles: modifiedFilesMap
+        });
+        core.info(`Scanned ${scanResult.totalFilesScanned} file(s). Found ${scanResult.findings.length} issue(s).`);
+        core.info(`Severity Breakdown: [CRITICAL: ${scanResult.summary.critical}] [HIGH: ${scanResult.summary.high}] [MEDIUM: ${scanResult.summary.medium}] [LOW: ${scanResult.summary.low}]`);
+        core.setOutput('findings-count', scanResult.summary.total.toString());
+        core.setOutput('critical-count', scanResult.summary.critical.toString());
+        core.setOutput('high-count', scanResult.summary.high.toString());
+        core.setOutput('medium-count', scanResult.summary.medium.toString());
+        core.setOutput('low-count', scanResult.summary.low.toString());
         core.setOutput('sarif-path', config.outputPath);
-        core.info('Wide Action Phase 1 initialization completed successfully.');
+        for (const finding of scanResult.findings) {
+            const location = `${finding.file}:${finding.line}`;
+            const msg = `[${finding.severity}] ${finding.title} (${finding.cwe}): ${finding.description}`;
+            if (finding.severity === 'CRITICAL' || finding.severity === 'HIGH') {
+                core.error(`${location} - ${msg}`);
+            }
+            else if (finding.severity === 'MEDIUM') {
+                core.warning(`${location} - ${msg}`);
+            }
+            else {
+                core.notice(`${location} - ${msg}`);
+            }
+        }
+        if (config.failOn !== 'NEVER') {
+            const thresholdRank = src_SEVERITY_RANKS[config.failOn] || 3;
+            const blockingFindings = scanResult.findings.filter(f => src_SEVERITY_RANKS[f.severity] >= thresholdRank);
+            if (blockingFindings.length > 0) {
+                core.setFailed(`Wide Security Gate: Found ${blockingFindings.length} issue(s) at or above ${config.failOn} threshold.`);
+                return;
+            }
+        }
+        core.info('Wide Security Gate: All checks passed.');
     }
     catch (error) {
         if (error instanceof Error) {
