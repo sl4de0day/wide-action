@@ -151,7 +151,7 @@ export function generateSarifReport(
         tool: {
           driver: {
             name: 'Wide Security',
-            version: '0.191126',
+            version: '0.291126',
             informationUri: 'https://github.com/sl4de0day/wide-action',
             rules: Array.from(rulesMap.values())
           }
