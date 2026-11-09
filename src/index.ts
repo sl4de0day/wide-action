@@ -3,6 +3,7 @@ import * as github from '@actions/github';
 import { getConfig } from './config.js';
 import { getPullRequestDiff, getLocalGitDiff } from './git.js';
 import { SecurityScanner } from './engine/scanner.js';
+import { PrCommenter } from './reporter/pr-commenter.js';
 import { SeverityLevel } from './types.js';
 
 const SEVERITY_RANKS: Record<SeverityLevel, number> = {
@@ -27,12 +28,13 @@ export async function run(): Promise<void> {
     core.info(`Only Diff: ${config.onlyDiff}`);
 
     const prNumber = github.context.payload.pull_request?.number;
+    const prHeadSha = github.context.payload.pull_request?.head?.sha || sha;
     const modifiedFilesMap = new Map<string, Set<number>>();
+    const octokit = config.githubToken ? github.getOctokit(config.githubToken) : null;
 
     if (config.onlyDiff) {
-      if (prNumber && config.githubToken) {
+      if (prNumber && octokit) {
         core.info(`Fetching diff for Pull Request #${prNumber}...`);
-        const octokit = github.getOctokit(config.githubToken);
         const prDiffs = await getPullRequestDiff(octokit, repo.owner, repo.repo, prNumber);
         for (const file of prDiffs) {
           modifiedFilesMap.set(file.filename, file.changedLines);
@@ -77,18 +79,37 @@ export async function run(): Promise<void> {
       }
     }
 
+    let isBlocked = false;
     if (config.failOn !== 'NEVER') {
       const thresholdRank = SEVERITY_RANKS[config.failOn as SeverityLevel] || 3;
-      const blockingFindings = scanResult.findings.filter(
+      isBlocked = scanResult.findings.some(
         f => SEVERITY_RANKS[f.severity] >= thresholdRank
       );
+    }
 
-      if (blockingFindings.length > 0) {
-        core.setFailed(
-          `Wide Security Gate: Found ${blockingFindings.length} issue(s) at or above ${config.failOn} threshold.`
-        );
-        return;
-      }
+    if (prNumber && octokit) {
+      core.info('Publishing PR review and summary comments...');
+      const commenter = new PrCommenter({
+        octokit,
+        owner: repo.owner,
+        repo: repo.repo,
+        pullNumber: prNumber,
+        commitSha: prHeadSha
+      });
+
+      await commenter.postOrUpdateSummary(scanResult, config.failOn, isBlocked);
+      await commenter.postInlineReviewComments(scanResult.findings);
+    }
+
+    if (isBlocked) {
+      const thresholdRank = SEVERITY_RANKS[config.failOn as SeverityLevel] || 3;
+      const blockingCount = scanResult.findings.filter(
+        f => SEVERITY_RANKS[f.severity] >= thresholdRank
+      ).length;
+      core.setFailed(
+        `Wide Security Gate: Found ${blockingCount} issue(s) at or above ${config.failOn} threshold.`
+      );
+      return;
     }
 
     core.info('Wide Security Gate: All checks passed.');
