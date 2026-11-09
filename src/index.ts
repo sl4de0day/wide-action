@@ -5,6 +5,7 @@ import { getPullRequestDiff, getLocalGitDiff } from './git.js';
 import { SecurityScanner } from './engine/scanner.js';
 import { RemediationEngine } from './remediation/engine.js';
 import { PrCommenter } from './reporter/pr-commenter.js';
+import { writeSarifReport } from './sarif.js';
 import { SeverityLevel } from './types.js';
 
 const SEVERITY_RANKS: Record<SeverityLevel, number> = {
@@ -27,6 +28,7 @@ export async function run(): Promise<void> {
     core.info(`Commit SHA: ${sha}`);
     core.info(`Fail-On Threshold: ${config.failOn}`);
     core.info(`Only Diff: ${config.onlyDiff}`);
+    core.info(`SARIF Output: ${config.sarif ? config.outputPath : 'disabled'}`);
     core.info(`AI Remediation: ${config.aiRemediation ? config.provider : 'disabled'}`);
 
     const prNumber = github.context.payload.pull_request?.number;
@@ -82,12 +84,18 @@ export async function run(): Promise<void> {
       }
     }
 
+    if (config.sarif) {
+      writeSarifReport(config.outputPath, scanResult.findings);
+      core.setOutput('sarif-path', config.outputPath);
+    } else {
+      core.setOutput('sarif-path', '');
+    }
+
     core.setOutput('findings-count', scanResult.summary.total.toString());
     core.setOutput('critical-count', scanResult.summary.critical.toString());
     core.setOutput('high-count', scanResult.summary.high.toString());
     core.setOutput('medium-count', scanResult.summary.medium.toString());
     core.setOutput('low-count', scanResult.summary.low.toString());
-    core.setOutput('sarif-path', config.outputPath);
 
     for (const finding of scanResult.findings) {
       const location = `${finding.file}:${finding.line}`;

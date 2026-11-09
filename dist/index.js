@@ -32638,7 +32638,115 @@ class PrCommenter {
     }
 }
 
+;// CONCATENATED MODULE: ./src/sarif.ts
+
+
+
+
+function severityToSarifLevel(severity) {
+    switch (severity) {
+        case 'CRITICAL':
+        case 'HIGH':
+            return 'error';
+        case 'MEDIUM':
+            return 'warning';
+        case 'LOW':
+            return 'note';
+        case 'INFO':
+        default:
+            return 'none';
+    }
+}
+function severityToProblemSeverity(severity) {
+    switch (severity) {
+        case 'CRITICAL':
+        case 'HIGH':
+            return 'error';
+        case 'MEDIUM':
+            return 'warning';
+        case 'LOW':
+        default:
+            return 'recommendation';
+    }
+}
+function generateSarifReport(findings) {
+    const rulesMap = new Map();
+    for (const rule of SECURITY_RULES) {
+        const cweTag = rule.cwe.toLowerCase();
+        rulesMap.set(rule.id, {
+            id: rule.id,
+            name: rule.category.replace(/[^a-zA-Z0-9]/g, ''),
+            shortDescription: { text: rule.category },
+            fullDescription: { text: rule.message },
+            defaultConfiguration: { level: severityToSarifLevel(rule.severity) },
+            help: {
+                text: `${rule.message}\nRemediation: ${rule.remediation}`,
+                markdown: `**${rule.category}** (${rule.cwe})\n\n${rule.message}\n\n### Remediation\n${rule.remediation}`
+            },
+            properties: {
+                tags: ['security', 'sast', cweTag],
+                precision: 'high',
+                'problem.severity': severityToProblemSeverity(rule.severity)
+            }
+        });
+    }
+    const results = [];
+    for (const finding of findings) {
+        const normalizedUri = finding.file.replace(/\\/g, '/');
+        const sarifLevel = severityToSarifLevel(finding.severity);
+        results.push({
+            ruleId: finding.ruleId,
+            level: sarifLevel,
+            message: {
+                text: `[${finding.severity}] ${finding.title}: ${finding.description}`
+            },
+            locations: [
+                {
+                    physicalLocation: {
+                        artifactLocation: {
+                            uri: normalizedUri,
+                            uriBaseId: '%SRCROOT%'
+                        },
+                        region: {
+                            startLine: Math.max(1, finding.line),
+                            startColumn: 1,
+                            ...(finding.snippet ? { snippet: { text: finding.snippet } } : {})
+                        }
+                    }
+                }
+            ]
+        });
+    }
+    return {
+        $schema: 'https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json',
+        version: '2.1.0',
+        runs: [
+            {
+                tool: {
+                    driver: {
+                        name: 'Wide Security',
+                        version: '1.0.0',
+                        informationUri: 'https://github.com/sl4de0day/wide-action',
+                        rules: Array.from(rulesMap.values())
+                    }
+                },
+                results
+            }
+        ]
+    };
+}
+function writeSarifReport(outputPath, findings, workspaceDir = process.cwd()) {
+    const fullPath = (0,external_node_path_namespaceObject.resolve)(workspaceDir, outputPath);
+    const dir = (0,external_node_path_namespaceObject.dirname)(fullPath);
+    (0,external_node_fs_namespaceObject.mkdirSync)(dir, { recursive: true });
+    const sarifData = generateSarifReport(findings);
+    (0,external_node_fs_namespaceObject.writeFileSync)(fullPath, JSON.stringify(sarifData, null, 2), 'utf8');
+    core.info(`Generated SARIF 2.1.0 report at: ${outputPath}`);
+    return fullPath;
+}
+
 ;// CONCATENATED MODULE: ./src/index.ts
+
 
 
 
@@ -32664,6 +32772,7 @@ async function run() {
         core.info(`Commit SHA: ${sha}`);
         core.info(`Fail-On Threshold: ${config.failOn}`);
         core.info(`Only Diff: ${config.onlyDiff}`);
+        core.info(`SARIF Output: ${config.sarif ? config.outputPath : 'disabled'}`);
         core.info(`AI Remediation: ${config.aiRemediation ? config.provider : 'disabled'}`);
         const prNumber = github.context.payload.pull_request?.number;
         const prHeadSha = github.context.payload.pull_request?.head?.sha || sha;
@@ -32714,12 +32823,18 @@ async function run() {
                 }
             }
         }
+        if (config.sarif) {
+            writeSarifReport(config.outputPath, scanResult.findings);
+            core.setOutput('sarif-path', config.outputPath);
+        }
+        else {
+            core.setOutput('sarif-path', '');
+        }
         core.setOutput('findings-count', scanResult.summary.total.toString());
         core.setOutput('critical-count', scanResult.summary.critical.toString());
         core.setOutput('high-count', scanResult.summary.high.toString());
         core.setOutput('medium-count', scanResult.summary.medium.toString());
         core.setOutput('low-count', scanResult.summary.low.toString());
-        core.setOutput('sarif-path', config.outputPath);
         for (const finding of scanResult.findings) {
             const location = `${finding.file}:${finding.line}`;
             const msg = `[${finding.severity}] ${finding.title} (${finding.cwe}): ${finding.description}`;
