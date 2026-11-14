@@ -1,6 +1,7 @@
 import * as core from '@actions/core';
 import { VulnerabilityFinding } from '../types.js';
 import { WeightedScorer, Criterion, Commitment } from './decision.js';
+import { RuleLoader } from '../engine/loader.js';
 
 export interface RemediationOptions {
   provider: string;
@@ -78,7 +79,8 @@ export class RemediationEngine {
   }
 
   private buildPrompt(finding: VulnerabilityFinding, context: string): string {
-    return [
+    const guardrails = RuleLoader.buildAgentInstructions();
+    const parts = [
       'You are an automated secure code remediation assistant.',
       `Vulnerability Detected: ${finding.title} (${finding.cwe || 'CWE'})`,
       `Severity: ${finding.severity}`,
@@ -95,9 +97,12 @@ export class RemediationEngine {
       '```suggestion',
       '<replacement code here>',
       '```',
-      'Do not include any explanations, prose, or commentary outside the suggestion block.',
-      'Do not use emojis under any circumstances.'
-    ].join('\n');
+      'Do not include any explanations, prose, or commentary outside the suggestion block.'
+    ];
+    if (guardrails) {
+      parts.push('', 'Ecosystem Agent Guardrails (wide-rules):', guardrails);
+    }
+    return parts.join('\n');
   }
 
   private async callGemini(prompt: string): Promise<string | null> {
@@ -210,17 +215,17 @@ export class RemediationEngine {
 
     const match = raw.match(/```suggestion\r?\n([\s\S]*?)\r?\n```/);
     if (match && match[1] !== undefined) {
-      return match[1].trimEnd().replace(/\p{Extended_Pictographic}/gu, "");
+      return RuleLoader.sanitizeOutput(match[1].trimEnd());
     }
 
     const codeBlockMatch = raw.match(/```(?:[a-zA-Z0-9_\-]+)?\r?\n([\s\S]*?)\r?\n```/);
     if (codeBlockMatch && codeBlockMatch[1] !== undefined) {
-      return codeBlockMatch[1].trimEnd().replace(/\p{Extended_Pictographic}/gu, "");
+      return RuleLoader.sanitizeOutput(codeBlockMatch[1].trimEnd());
     }
 
     const trimmed = raw.trim();
     if (trimmed && !trimmed.includes('```')) {
-      return trimmed.replace(/\p{Extended_Pictographic}/gu, "");
+      return RuleLoader.sanitizeOutput(trimmed);
     }
 
     return null;

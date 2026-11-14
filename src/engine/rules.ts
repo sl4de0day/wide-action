@@ -10,6 +10,7 @@ export interface SecurityRule {
   sourcePattern?: RegExp;
   message: string;
   remediation: string;
+  instruction?: string;
 }
 
 export const SECURITY_RULES: readonly SecurityRule[] = [
@@ -53,7 +54,7 @@ export const SECURITY_RULES: readonly SecurityRule[] = [
     languages: ['js', 'ts', 'py', 'php', 'go', 'java'],
     pattern: /(?:fetch|axios\.(?:get|post|request)|http\.get|urllib\.request|requests\.(?:get|post)|curl_exec)\s*\(\s*(?:req\.|params|query|body|request\.)/i,
     message: 'Outbound HTTP request targeting a user-supplied URL without destination validation.',
-    remediation: 'Validate destination URLs against an explicit domain allowlist and block private IP ranges.'
+    remediation: 'Validate destination URLs against an explicit domain allowlist and block private IP ranges (127.0.0.1, 10.0.0.0/8, 169.254.169.254).'
   },
   {
     id: 'WIDE-SEC-005',
@@ -73,7 +74,7 @@ export const SECURITY_RULES: readonly SecurityRule[] = [
     languages: ['js', 'ts', 'py', 'php', 'java'],
     pattern: /(?:pickle\.loads|yaml\.load\([^,)]+\)|unserialize\s*\(|node-serialize|serialize\.unserialize|XMLDecoder|ObjectInputStream)/i,
     message: 'Untrusted deserialization can lead to arbitrary code execution.',
-    remediation: 'Never deserialize untrusted input with unsafe serializers. Use JSON.parse or safe_load in PyYAML.'
+    remediation: 'Never deserialize untrusted input with unsafe serializers. Use JSON.parse, safe_load in PyYAML, or HMAC verification.'
   },
   {
     id: 'WIDE-SEC-007',
@@ -83,7 +84,7 @@ export const SECURITY_RULES: readonly SecurityRule[] = [
     languages: ['js', 'ts', 'py', 'php', 'java'],
     pattern: /(?:xml2js|DOMParser|SimpleXMLElement|libxml_disable_entity_loader\s*\(\s*false|DocumentBuilderFactory.*?setFeature.*?external-general-entities.*?true)/i,
     message: 'XML parser configured without disabling external entity resolution.',
-    remediation: 'Disable external DTDs and external entity expansion.'
+    remediation: 'Disable external DTDs and external entity expansion (e.g. setFeature(\'http://apache.org/xml/features/disallow-doctype-decl\', true)).'
   },
   {
     id: 'WIDE-SEC-008',
@@ -93,7 +94,7 @@ export const SECURITY_RULES: readonly SecurityRule[] = [
     languages: ['all'],
     pattern: /(?:(?:api_?key|secret|password|access_?token|jwt_?secret|private_?key)\s*[:=]\s*['"][a-zA-Z0-9_\-\.]{16,}['"]|AKIA[0-9A-Z]{16}|ghp_[a-zA-Z0-9]{36}|AIza[0-9A-Za-z\-_]{35})/i,
     message: 'High-entropy API token, private key, or credential hardcoded in source.',
-    remediation: 'Extract secrets to environment variables or an external secret manager.'
+    remediation: 'Extract secrets to environment variables or an external secret manager (AWS Secrets Manager, Vault).'
   },
   {
     id: 'WIDE-SEC-009',
@@ -103,7 +104,7 @@ export const SECURITY_RULES: readonly SecurityRule[] = [
     languages: ['js', 'ts', 'py', 'php', 'java', 'cs', 'go'],
     pattern: /(?:createHash\s*\(\s*['"](?:md5|sha1)['"]|hashlib\.(?:md5|sha1)|MD5\.Create|DES|RC4|crypto\.createCipheriv\s*\(\s*['"][^'"]*ecb)/i,
     message: 'Collision-prone or deprecated cryptographic algorithm (MD5/SHA1/DES/ECB mode).',
-    remediation: 'Use SHA-256 or SHA-512 for integrity, bcrypt/argon2 for passwords, and AES-256-GCM for encryption.'
+    remediation: 'Use SHA-256/SHA-512 for integrity, bcrypt/argon2 for passwords, and AES-256-GCM for symmetric encryption.'
   },
   {
     id: 'WIDE-SEC-010',
@@ -134,7 +135,7 @@ export const SECURITY_RULES: readonly SecurityRule[] = [
     languages: ['js', 'ts'],
     pattern: /(?:__proto__|constructor\s*\[\s*['"]prototype['"]\]|Object\.assign\s*\(\s*\{\}\s*,\s*(?:req\.|body|params)|merge\s*\([^,]+,\s*(?:req\.|body))/i,
     message: 'Potential prototype pollution via unsafe recursive object merging.',
-    remediation: 'Validate keys against __proto__ and constructor, or use Object.create(null).'
+    remediation: 'Validate keys against \'__proto__\' and \'constructor\', or use Object.create(null) for unpolluted dictionaries.'
   },
   {
     id: 'WIDE-SEC-013',
@@ -144,7 +145,7 @@ export const SECURITY_RULES: readonly SecurityRule[] = [
     languages: ['js', 'ts', 'py'],
     pattern: /(?:\.find|\.findOne|\.deleteMany|\.updateMany)\s*\(\s*(?:req\.(?:body|query|params)|\{[^}]*\$(?:where|ne|gt|regex))/i,
     message: 'NoSQL query structure accepts raw user object without type coercion.',
-    remediation: 'Enforce strict schema validation and sanitize inputs so operator objects cannot be injected.'
+    remediation: 'Enforce strict schema validation and sanitize inputs so operator objects ($gt, $where) cannot be injected.'
   },
   {
     id: 'WIDE-SEC-014',
@@ -194,7 +195,7 @@ export const SECURITY_RULES: readonly SecurityRule[] = [
     languages: ['js', 'ts', 'py', 'php'],
     pattern: /(?:app\.(?:post|put|delete|patch)\s*\([^,]+,\s*(?!.*?csrf).*?\bfunction\b|csrfProtection.*?enabled:\s*false)/i,
     message: 'State-changing HTTP route registered without apparent CSRF token protection.',
-    remediation: 'Enable SameSite cookies and use CSRF tokens (csurf or double-submit cookie pattern).'
+    remediation: 'Enable SameSite=Lax/Strict cookie attributes and use CSRF tokens (csurf or double-submit cookie pattern).'
   },
   {
     id: 'WIDE-SEC-019',
@@ -215,5 +216,107 @@ export const SECURITY_RULES: readonly SecurityRule[] = [
     pattern: /(?:res\.(?:send|json)\s*\(\s*(?:err\.stack|err\.message|error\.stack)|printStackTrace\s*\(\)|ini_set\s*\(\s*['"]display_errors['"]\s*,\s*['"]1['"]\))/i,
     message: 'Detailed internal error stack trace or debug information exposed to client.',
     remediation: 'Log stack traces internally and return generic error responses with error correlation IDs to clients.'
+  }
+];
+
+export const DEFAULT_AGENT_RULES: readonly SecurityRule[] = [
+  {
+    id: 'wide/ai-no-emojis',
+    cwe: 'N/A',
+    category: 'AI_SECURITY',
+    severity: 'HIGH',
+    languages: ['all'],
+    pattern: /(?:[\uD800-\uDBFF][\uDC00-\uDFFF]|[\u2600-\u27BF])/,
+    message: 'AI agents must not use emojis or emoticons under any circumstances.',
+    remediation: 'Strip all emojis from text and outputs, preserving clean technical prose.',
+    instruction: 'Do not use emojis anywhere in your responses or generated code. Never output emojis under any circumstances.'
+  },
+  {
+    id: 'wide/cwe078-ai-unsafe-tool-exec',
+    cwe: 'CWE-78',
+    category: 'AI_SECURITY',
+    severity: 'CRITICAL',
+    languages: ['js', 'jsx', 'ts', 'tsx', 'py', 'mjs', 'cjs'],
+    pattern: /\b(?:exec|execSync|spawn|subprocess\.run|os\.system)\s*\(\s*(?:toolCall|tool_call|args|arguments|response\.command|patch\.command)/i,
+    message: 'Executing raw system command directly from AI tool call response without argument validation.',
+    remediation: 'Whitelist allowed commands and run them in an isolated sandbox with fixed arguments.',
+    instruction: 'Never execute raw system commands directly from AI tool call responses without argument validation.'
+  },
+  {
+    id: 'wide/cwe079-ai-prompt-injection',
+    cwe: 'CWE-79',
+    category: 'AI_SECURITY',
+    severity: 'HIGH',
+    languages: ['js', 'jsx', 'ts', 'tsx', 'py', 'mjs', 'cjs'],
+    pattern: /\b(?:prompt|instruction|query|input)\s*[:=]\s*(?:f?["'].*?\{|`.*?$\{).*(?:req\.|params\.|body\.|userInput|user_input|request\.)/i,
+    message: 'Untrusted user input concatenated directly into LLM prompt template without sanitization.',
+    remediation: 'Use structured multi-turn message roles or sanitize prompt inputs before sending to the model.',
+    instruction: 'Always validate and sanitize untrusted user input before incorporating into prompt templates.'
+  },
+  {
+    id: 'wide/cwe095-ai-unconstrained-eval',
+    cwe: 'CWE-95',
+    category: 'AI_SECURITY',
+    severity: 'CRITICAL',
+    languages: ['js', 'jsx', 'ts', 'tsx', 'py', 'mjs', 'cjs'],
+    pattern: /\b(?:eval|Function|vm\.runInContext|compile)\s*\(\s*(?:toolOutput|tool_output|response\.text|aiResult|ai_output|completion)/i,
+    message: 'Evaluating raw executable code returned by LLM without sandboxing or static verification.',
+    remediation: 'Parse responses into structured abstract syntax trees or validate against a strict AST schema before execution.',
+    instruction: 'Never evaluate raw executable code dynamically without AST schema validation or sandboxing.'
+  },
+  {
+    id: 'wide/cwe306-ai-unauthenticated-mcp-registration',
+    cwe: 'CWE-306',
+    category: 'AI_SECURITY',
+    severity: 'HIGH',
+    languages: ['js', 'jsx', 'ts', 'tsx', 'py', 'mjs', 'cjs'],
+    pattern: /\b(?:registerMcpServer|addMcpServer|mcpClient\.connect)\s*\(\s*(?:url|endpoint|serverConfig)\s*\)/i,
+    message: 'Model Context Protocol server registered without identity verification or authorization signature.',
+    remediation: 'Verify server host authorization and enforce cryptographic signature checks prior to registering external toolsets.',
+    instruction: 'Never register external toolsets or MCP servers without authentication and user authorization.'
+  },
+  {
+    id: 'wide/cwe400-ai-unbounded-agent-loop',
+    cwe: 'CWE-400',
+    category: 'AI_SECURITY',
+    severity: 'MEDIUM',
+    languages: ['js', 'jsx', 'ts', 'tsx', 'py', 'mjs', 'cjs'],
+    pattern: /while\s*\(\s*(?:true|1|!done|!finished|!settled)\s*\)\s*\{(?![^}]*\b(?:maxRounds|maxSteps|maxIterations|round\s*>=|step\s*>=)\b)/i,
+    message: 'Autonomous agent execution loop lacks explicit termination boundary or maximum step limit.',
+    remediation: 'Enforce a strict step threshold or cancellation budget to prevent runaway agent execution loops.',
+    instruction: 'Always respect maximum step thresholds and loop termination boundaries.'
+  },
+  {
+    id: 'wide/cwe770-ai-unbounded-context-accumulation',
+    cwe: 'CWE-770',
+    category: 'AI_SECURITY',
+    severity: 'MEDIUM',
+    languages: ['js', 'jsx', 'ts', 'tsx', 'py', 'mjs', 'cjs'],
+    pattern: /\b(?:history|messages|chatContext)\.push\s*\(.*?\)(?![^;]*(?:slice|shift|trim|truncate|maxTokens|maxHistory))/i,
+    message: 'LLM conversation context accumulates without token limits or sliding window truncation.',
+    remediation: 'Prune chat context using sliding window truncation or token counting before appending turns.',
+    instruction: 'Maintain concise conversation context and avoid unbounded accumulation.'
+  },
+  {
+    id: 'wide/cwe798-ai-prompt-secret-leak',
+    cwe: 'CWE-798',
+    category: 'AI_SECURITY',
+    severity: 'HIGH',
+    languages: ['js', 'jsx', 'ts', 'tsx', 'py', 'mjs', 'cjs'],
+    pattern: /\b(?:systemPrompt|systemMessage|system_prompt)\s*[:=].*?(?:process\.env\.(?:[A-Z_]*(?:KEY|SECRET|TOKEN|PASSWORD|PASS|AUTH))|apiKey|api_key|secret)/i,
+    message: 'Sensitive secrets or private API credentials embedded in prompt context.',
+    remediation: 'Strip private credentials from prompt text and provide secrets through isolated backend proxy channels.',
+    instruction: 'Never include secrets, API keys, private tokens, or credentials in prompt context or output.'
+  },
+  {
+    id: 'wide/cwe829-ai-unvalidated-patch-apply',
+    cwe: 'CWE-829',
+    category: 'AI_SECURITY',
+    severity: 'HIGH',
+    languages: ['js', 'jsx', 'ts', 'tsx', 'py', 'mjs', 'cjs'],
+    pattern: /\b(?:applyPatch|gitApply|applyDiff|writePatch)\s*\(\s*(?:aiPatch|llmResponse|output\.patch|modelDiff)/i,
+    message: 'Applying LLM-generated patch directly to codebase without path traversal or integrity checks.',
+    remediation: 'Validate destination file paths are strictly within workspace bounds and run static scans before applying patches.',
+    instruction: 'Always inspect relevant files before modifying them, validate bounds, and verify patch integrity.'
   }
 ];
