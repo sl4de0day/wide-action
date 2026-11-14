@@ -95,7 +95,8 @@ export class RemediationEngine {
       '```suggestion',
       '<replacement code here>',
       '```',
-      'Do not include any explanations, prose, or commentary outside the suggestion block.'
+      'Do not include any explanations, prose, or commentary outside the suggestion block.',
+      'Do not use emojis under any circumstances.'
     ].join('\n');
   }
 
@@ -209,17 +210,17 @@ export class RemediationEngine {
 
     const match = raw.match(/```suggestion\r?\n([\s\S]*?)\r?\n```/);
     if (match && match[1] !== undefined) {
-      return match[1].trimEnd();
+      return match[1].trimEnd().replace(/\p{Extended_Pictographic}/gu, "");
     }
 
     const codeBlockMatch = raw.match(/```(?:[a-zA-Z0-9_\-]+)?\r?\n([\s\S]*?)\r?\n```/);
     if (codeBlockMatch && codeBlockMatch[1] !== undefined) {
-      return codeBlockMatch[1].trimEnd();
+      return codeBlockMatch[1].trimEnd().replace(/\p{Extended_Pictographic}/gu, "");
     }
 
     const trimmed = raw.trim();
     if (trimmed && !trimmed.includes('```')) {
-      return trimmed;
+      return trimmed.replace(/\p{Extended_Pictographic}/gu, "");
     }
 
     return null;
