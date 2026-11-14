@@ -1,9 +1,21 @@
+import { createHash } from 'node:crypto';
 import { readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import * as core from '@actions/core';
 import { SECURITY_RULES, DEFAULT_AGENT_RULES, SecurityRule } from './rules.js';
 
 const REMOTE_RULES_URL = 'https://raw.githubusercontent.com/sl4de0day/wide-rules/main/dist/rules.json';
+const REMOTE_OSV_URL = 'https://raw.githubusercontent.com/sl4de0day/wide-rules/main/dist/osv-bundle.json';
+const REMOTE_CHECKSUMS_URL = 'https://raw.githubusercontent.com/sl4de0day/wide-rules/main/dist/SHA256SUMS';
+
+function parseChecksums(raw: string): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const line of String(raw || '').split(/\r?\n/)) {
+    const m = /^([a-fA-F0-9]{64})\s+\*?(.+)$/.exec(line.trim());
+    if (m) out.set(m[2].trim(), m[1].toLowerCase());
+  }
+  return out;
+}
 
 export class RuleLoader {
   public static async loadRules(
@@ -15,11 +27,26 @@ export class RuleLoader {
     if (trimmed.toLowerCase() === 'latest') {
       try {
         core.info(`Fetching latest security rules from ${REMOTE_RULES_URL}...`);
+        let checksums = new Map<string, string>();
+        try {
+          const sumRes = await fetch(REMOTE_CHECKSUMS_URL);
+          if (sumRes.ok) checksums = parseChecksums(await sumRes.text());
+        } catch {
+          void 0;
+        }
         const response = await fetch(REMOTE_RULES_URL);
         if (!response.ok) {
           throw new Error(`HTTP ${response.status}: ${response.statusText}`);
         }
-        const data = await response.json() as any;
+        const raw = await response.text();
+        const expectedSha = checksums.get('rules.json');
+        if (expectedSha) {
+          const actualSha = createHash('sha256').update(raw).digest('hex');
+          if (actualSha !== expectedSha) {
+            throw new Error('SHA-256 mismatch while downloading rules.json');
+          }
+        }
+        const data = JSON.parse(raw) as any;
         const list = Array.isArray(data) ? data : (data?.rules || []);
         const converted = this.parseRulesList(list);
         if (converted.length > 0) {
@@ -112,6 +139,7 @@ export class RuleLoader {
     for (const item of list) {
       if (!item.id || !item.pattern) continue;
       try {
+        const notMatchRaw = item['not-match'] || item.notMatch;
         result.push({
           id: item.id,
           cwe: item.cwe || 'N/A',
@@ -119,6 +147,7 @@ export class RuleLoader {
           severity: item.severity || 'MEDIUM',
           languages: item.languages || ['all'],
           pattern: new RegExp(item.pattern, 'i'),
+          notMatch: typeof notMatchRaw === 'string' && notMatchRaw ? new RegExp(notMatchRaw, 'i') : undefined,
           sourcePattern: item['source-pattern'] ? new RegExp(item['source-pattern'], 'i') : undefined,
           message: item.message || '',
           remediation: item.remediation || '',
@@ -129,5 +158,50 @@ export class RuleLoader {
       }
     }
     return result;
+  }
+
+  public static async loadAdvisories(
+    source = 'embedded',
+    workspaceDir = process.cwd()
+  ): Promise<Record<string, any>> {
+    if (source.trim().toLowerCase() === 'latest') {
+      try {
+        let checksums = new Map<string, string>();
+        try {
+          const sumRes = await fetch(REMOTE_CHECKSUMS_URL);
+          if (sumRes.ok) checksums = parseChecksums(await sumRes.text());
+        } catch {
+          void 0;
+        }
+        const res = await fetch(REMOTE_OSV_URL);
+        if (res.ok) {
+          const raw = await res.text();
+          const expectedSha = checksums.get('osv-bundle.json');
+          if (expectedSha) {
+            const actualSha = createHash('sha256').update(raw).digest('hex');
+            if (actualSha !== expectedSha) {
+              throw new Error('SHA-256 mismatch while downloading osv-bundle.json');
+            }
+          }
+          return JSON.parse(raw);
+        }
+      } catch (err) {
+        core.warning(`Failed to fetch latest OSV advisories: ${String(err)}.`);
+      }
+    }
+    const candidates = [
+      resolve(workspaceDir, '.wide', 'osv.json'),
+      resolve(workspaceDir, '../wide-rules/dist/osv-bundle.json')
+    ];
+    for (const file of candidates) {
+      if (existsSync(file)) {
+        try {
+          return JSON.parse(readFileSync(file, 'utf8'));
+        } catch {
+          void 0;
+        }
+      }
+    }
+    return { npm: [], pip: [], maven: [], go: [] };
   }
 }

@@ -31933,7 +31933,7 @@ const SECURITY_RULES = [
         languages: ['js', 'ts', 'py', 'php', 'go', 'java'],
         pattern: /(?:fetch|axios\.(?:get|post|request)|http\.get|urllib\.request|requests\.(?:get|post)|curl_exec)\s*\(\s*(?:req\.|params|query|body|request\.)/i,
         message: 'Outbound HTTP request targeting a user-supplied URL without destination validation.',
-        remediation: 'Validate destination URLs against an explicit domain allowlist and block private IP ranges.'
+        remediation: 'Validate destination URLs against an explicit domain allowlist and block private IP ranges (127.0.0.1, 10.0.0.0/8, 169.254.169.254).'
     },
     {
         id: 'WIDE-SEC-005',
@@ -31953,7 +31953,7 @@ const SECURITY_RULES = [
         languages: ['js', 'ts', 'py', 'php', 'java'],
         pattern: /(?:pickle\.loads|yaml\.load\([^,)]+\)|unserialize\s*\(|node-serialize|serialize\.unserialize|XMLDecoder|ObjectInputStream)/i,
         message: 'Untrusted deserialization can lead to arbitrary code execution.',
-        remediation: 'Never deserialize untrusted input with unsafe serializers. Use JSON.parse or safe_load in PyYAML.'
+        remediation: 'Never deserialize untrusted input with unsafe serializers. Use JSON.parse, safe_load in PyYAML, or HMAC verification.'
     },
     {
         id: 'WIDE-SEC-007',
@@ -31963,7 +31963,7 @@ const SECURITY_RULES = [
         languages: ['js', 'ts', 'py', 'php', 'java'],
         pattern: /(?:xml2js|DOMParser|SimpleXMLElement|libxml_disable_entity_loader\s*\(\s*false|DocumentBuilderFactory.*?setFeature.*?external-general-entities.*?true)/i,
         message: 'XML parser configured without disabling external entity resolution.',
-        remediation: 'Disable external DTDs and external entity expansion.'
+        remediation: 'Disable external DTDs and external entity expansion (e.g. setFeature(\'http://apache.org/xml/features/disallow-doctype-decl\', true)).'
     },
     {
         id: 'WIDE-SEC-008',
@@ -31973,7 +31973,7 @@ const SECURITY_RULES = [
         languages: ['all'],
         pattern: /(?:(?:api_?key|secret|password|access_?token|jwt_?secret|private_?key)\s*[:=]\s*['"][a-zA-Z0-9_\-\.]{16,}['"]|AKIA[0-9A-Z]{16}|ghp_[a-zA-Z0-9]{36}|AIza[0-9A-Za-z\-_]{35})/i,
         message: 'High-entropy API token, private key, or credential hardcoded in source.',
-        remediation: 'Extract secrets to environment variables or an external secret manager.'
+        remediation: 'Extract secrets to environment variables or an external secret manager (AWS Secrets Manager, Vault).'
     },
     {
         id: 'WIDE-SEC-009',
@@ -31983,7 +31983,7 @@ const SECURITY_RULES = [
         languages: ['js', 'ts', 'py', 'php', 'java', 'cs', 'go'],
         pattern: /(?:createHash\s*\(\s*['"](?:md5|sha1)['"]|hashlib\.(?:md5|sha1)|MD5\.Create|DES|RC4|crypto\.createCipheriv\s*\(\s*['"][^'"]*ecb)/i,
         message: 'Collision-prone or deprecated cryptographic algorithm (MD5/SHA1/DES/ECB mode).',
-        remediation: 'Use SHA-256 or SHA-512 for integrity, bcrypt/argon2 for passwords, and AES-256-GCM for encryption.'
+        remediation: 'Use SHA-256/SHA-512 for integrity, bcrypt/argon2 for passwords, and AES-256-GCM for symmetric encryption.'
     },
     {
         id: 'WIDE-SEC-010',
@@ -32014,7 +32014,7 @@ const SECURITY_RULES = [
         languages: ['js', 'ts'],
         pattern: /(?:__proto__|constructor\s*\[\s*['"]prototype['"]\]|Object\.assign\s*\(\s*\{\}\s*,\s*(?:req\.|body|params)|merge\s*\([^,]+,\s*(?:req\.|body))/i,
         message: 'Potential prototype pollution via unsafe recursive object merging.',
-        remediation: 'Validate keys against __proto__ and constructor, or use Object.create(null).'
+        remediation: 'Validate keys against \'__proto__\' and \'constructor\', or use Object.create(null) for unpolluted dictionaries.'
     },
     {
         id: 'WIDE-SEC-013',
@@ -32024,7 +32024,7 @@ const SECURITY_RULES = [
         languages: ['js', 'ts', 'py'],
         pattern: /(?:\.find|\.findOne|\.deleteMany|\.updateMany)\s*\(\s*(?:req\.(?:body|query|params)|\{[^}]*\$(?:where|ne|gt|regex))/i,
         message: 'NoSQL query structure accepts raw user object without type coercion.',
-        remediation: 'Enforce strict schema validation and sanitize inputs so operator objects cannot be injected.'
+        remediation: 'Enforce strict schema validation and sanitize inputs so operator objects ($gt, $where) cannot be injected.'
     },
     {
         id: 'WIDE-SEC-014',
@@ -32074,7 +32074,7 @@ const SECURITY_RULES = [
         languages: ['js', 'ts', 'py', 'php'],
         pattern: /(?:app\.(?:post|put|delete|patch)\s*\([^,]+,\s*(?!.*?csrf).*?\bfunction\b|csrfProtection.*?enabled:\s*false)/i,
         message: 'State-changing HTTP route registered without apparent CSRF token protection.',
-        remediation: 'Enable SameSite cookies and use CSRF tokens (csurf or double-submit cookie pattern).'
+        remediation: 'Enable SameSite=Lax/Strict cookie attributes and use CSRF tokens (csurf or double-submit cookie pattern).'
     },
     {
         id: 'WIDE-SEC-019',
@@ -32095,6 +32095,107 @@ const SECURITY_RULES = [
         pattern: /(?:res\.(?:send|json)\s*\(\s*(?:err\.stack|err\.message|error\.stack)|printStackTrace\s*\(\)|ini_set\s*\(\s*['"]display_errors['"]\s*,\s*['"]1['"]\))/i,
         message: 'Detailed internal error stack trace or debug information exposed to client.',
         remediation: 'Log stack traces internally and return generic error responses with error correlation IDs to clients.'
+    }
+];
+const DEFAULT_AGENT_RULES = [
+    {
+        id: 'wide/ai-no-emojis',
+        cwe: 'N/A',
+        category: 'AI_SECURITY',
+        severity: 'HIGH',
+        languages: ['all'],
+        pattern: /(?:[\uD800-\uDBFF][\uDC00-\uDFFF]|[\u2600-\u27BF])/,
+        message: 'AI agents must not use emojis or emoticons under any circumstances.',
+        remediation: 'Strip all emojis from text and outputs, preserving clean technical prose.',
+        instruction: 'Do not use emojis anywhere in your responses or generated code. Never output emojis under any circumstances.'
+    },
+    {
+        id: 'wide/cwe078-ai-unsafe-tool-exec',
+        cwe: 'CWE-78',
+        category: 'AI_SECURITY',
+        severity: 'CRITICAL',
+        languages: ['js', 'jsx', 'ts', 'tsx', 'py', 'mjs', 'cjs'],
+        pattern: /\b(?:exec|execSync|spawn|subprocess\.run|os\.system)\s*\(\s*(?:toolCall|tool_call|args|arguments|response\.command|patch\.command)/i,
+        message: 'Executing raw system command directly from AI tool call response without argument validation.',
+        remediation: 'Whitelist allowed commands and run them in an isolated sandbox with fixed arguments.',
+        instruction: 'Never execute raw system commands directly from AI tool call responses without argument validation.'
+    },
+    {
+        id: 'wide/cwe079-ai-prompt-injection',
+        cwe: 'CWE-79',
+        category: 'AI_SECURITY',
+        severity: 'HIGH',
+        languages: ['js', 'jsx', 'ts', 'tsx', 'py', 'mjs', 'cjs'],
+        pattern: /\b(?:prompt|instruction|query|input)\s*[:=]\s*(?:f?["'].*?\{|`.*?$\{).*(?:req\.|params\.|body\.|userInput|user_input|request\.)/i,
+        message: 'Untrusted user input concatenated directly into LLM prompt template without sanitization.',
+        remediation: 'Use structured multi-turn message roles or sanitize prompt inputs before sending to the model.',
+        instruction: 'Always validate and sanitize untrusted user input before incorporating into prompt templates.'
+    },
+    {
+        id: 'wide/cwe095-ai-unconstrained-eval',
+        cwe: 'CWE-95',
+        category: 'AI_SECURITY',
+        severity: 'CRITICAL',
+        languages: ['js', 'jsx', 'ts', 'tsx', 'py', 'mjs', 'cjs'],
+        pattern: /\b(?:eval|Function|vm\.runInContext|compile)\s*\(\s*(?:toolOutput|tool_output|response\.text|aiResult|ai_output|completion)/i,
+        message: 'Evaluating raw executable code returned by LLM without sandboxing or static verification.',
+        remediation: 'Parse responses into structured abstract syntax trees or validate against a strict AST schema before execution.',
+        instruction: 'Never evaluate raw executable code dynamically without AST schema validation or sandboxing.'
+    },
+    {
+        id: 'wide/cwe306-ai-unauthenticated-mcp-registration',
+        cwe: 'CWE-306',
+        category: 'AI_SECURITY',
+        severity: 'HIGH',
+        languages: ['js', 'jsx', 'ts', 'tsx', 'py', 'mjs', 'cjs'],
+        pattern: /\b(?:registerMcpServer|addMcpServer|mcpClient\.connect)\s*\(\s*(?:url|endpoint|serverConfig)\s*\)/i,
+        message: 'Model Context Protocol server registered without identity verification or authorization signature.',
+        remediation: 'Verify server host authorization and enforce cryptographic signature checks prior to registering external toolsets.',
+        instruction: 'Never register external toolsets or MCP servers without authentication and user authorization.'
+    },
+    {
+        id: 'wide/cwe400-ai-unbounded-agent-loop',
+        cwe: 'CWE-400',
+        category: 'AI_SECURITY',
+        severity: 'MEDIUM',
+        languages: ['js', 'jsx', 'ts', 'tsx', 'py', 'mjs', 'cjs'],
+        pattern: /while\s*\(\s*(?:true|1|!done|!finished|!settled)\s*\)\s*\{(?![^}]*\b(?:maxRounds|maxSteps|maxIterations|round\s*>=|step\s*>=)\b)/i,
+        message: 'Autonomous agent execution loop lacks explicit termination boundary or maximum step limit.',
+        remediation: 'Enforce a strict step threshold or cancellation budget to prevent runaway agent execution loops.',
+        instruction: 'Always respect maximum step thresholds and loop termination boundaries.'
+    },
+    {
+        id: 'wide/cwe770-ai-unbounded-context-accumulation',
+        cwe: 'CWE-770',
+        category: 'AI_SECURITY',
+        severity: 'MEDIUM',
+        languages: ['js', 'jsx', 'ts', 'tsx', 'py', 'mjs', 'cjs'],
+        pattern: /\b(?:history|messages|chatContext)\.push\s*\(.*?\)(?![^;]*(?:slice|shift|trim|truncate|maxTokens|maxHistory))/i,
+        message: 'LLM conversation context accumulates without token limits or sliding window truncation.',
+        remediation: 'Prune chat context using sliding window truncation or token counting before appending turns.',
+        instruction: 'Maintain concise conversation context and avoid unbounded accumulation.'
+    },
+    {
+        id: 'wide/cwe798-ai-prompt-secret-leak',
+        cwe: 'CWE-798',
+        category: 'AI_SECURITY',
+        severity: 'HIGH',
+        languages: ['js', 'jsx', 'ts', 'tsx', 'py', 'mjs', 'cjs'],
+        pattern: /\b(?:systemPrompt|systemMessage|system_prompt)\s*[:=].*?(?:process\.env\.(?:[A-Z_]*(?:KEY|SECRET|TOKEN|PASSWORD|PASS|AUTH))|apiKey|api_key|secret)/i,
+        message: 'Sensitive secrets or private API credentials embedded in prompt context.',
+        remediation: 'Strip private credentials from prompt text and provide secrets through isolated backend proxy channels.',
+        instruction: 'Never include secrets, API keys, private tokens, or credentials in prompt context or output.'
+    },
+    {
+        id: 'wide/cwe829-ai-unvalidated-patch-apply',
+        cwe: 'CWE-829',
+        category: 'AI_SECURITY',
+        severity: 'HIGH',
+        languages: ['js', 'jsx', 'ts', 'tsx', 'py', 'mjs', 'cjs'],
+        pattern: /\b(?:applyPatch|gitApply|applyDiff|writePatch)\s*\(\s*(?:aiPatch|llmResponse|output\.patch|modelDiff)/i,
+        message: 'Applying LLM-generated patch directly to codebase without path traversal or integrity checks.',
+        remediation: 'Validate destination file paths are strictly within workspace bounds and run static scans before applying patches.',
+        instruction: 'Always inspect relevant files before modifying them, validate bounds, and verify patch integrity.'
     }
 ];
 
@@ -32206,6 +32307,8 @@ class SecurityScanner {
                 if (SEVERITY_RANKS[rule.severity] < minRank)
                     continue;
                 if (rule.pattern.test(lineText)) {
+                    if (rule.notMatch && rule.notMatch.test(lineText))
+                        continue;
                     let confirmed = true;
                     if (rule.sourcePattern) {
                         const windowStart = Math.max(0, i - 15);
@@ -32253,23 +32356,54 @@ class SecurityScanner {
     }
 }
 
+// EXTERNAL MODULE: external "node:crypto"
+var external_node_crypto_ = __nccwpck_require__(7598);
 ;// CONCATENATED MODULE: ./src/engine/loader.ts
 
 
 
 
+
 const REMOTE_RULES_URL = 'https://raw.githubusercontent.com/sl4de0day/wide-rules/main/dist/rules.json';
+const REMOTE_OSV_URL = 'https://raw.githubusercontent.com/sl4de0day/wide-rules/main/dist/osv-bundle.json';
+const REMOTE_CHECKSUMS_URL = 'https://raw.githubusercontent.com/sl4de0day/wide-rules/main/dist/SHA256SUMS';
+function parseChecksums(raw) {
+    const out = new Map();
+    for (const line of String(raw || '').split(/\r?\n/)) {
+        const m = /^([a-fA-F0-9]{64})\s+\*?(.+)$/.exec(line.trim());
+        if (m)
+            out.set(m[2].trim(), m[1].toLowerCase());
+    }
+    return out;
+}
 class RuleLoader {
     static async loadRules(source = 'embedded', workspaceDir = process.cwd()) {
         const trimmed = source.trim();
         if (trimmed.toLowerCase() === 'latest') {
             try {
                 core.info(`Fetching latest security rules from ${REMOTE_RULES_URL}...`);
+                let checksums = new Map();
+                try {
+                    const sumRes = await fetch(REMOTE_CHECKSUMS_URL);
+                    if (sumRes.ok)
+                        checksums = parseChecksums(await sumRes.text());
+                }
+                catch {
+                    void 0;
+                }
                 const response = await fetch(REMOTE_RULES_URL);
                 if (!response.ok) {
                     throw new Error(`HTTP ${response.status}: ${response.statusText}`);
                 }
-                const data = await response.json();
+                const raw = await response.text();
+                const expectedSha = checksums.get('rules.json');
+                if (expectedSha) {
+                    const actualSha = (0,external_node_crypto_.createHash)('sha256').update(raw).digest('hex');
+                    if (actualSha !== expectedSha) {
+                        throw new Error('SHA-256 mismatch while downloading rules.json');
+                    }
+                }
+                const data = JSON.parse(raw);
                 const list = Array.isArray(data) ? data : (data?.rules || []);
                 const converted = this.parseRulesList(list);
                 if (converted.length > 0) {
@@ -32303,7 +32437,54 @@ class RuleLoader {
                 core.warning(`Custom rules path not found: ${trimmed}. Using embedded rules.`);
             }
         }
+        const siblingRules = (0,external_node_path_namespaceObject.resolve)(workspaceDir, '../wide-rules/dist/rules.json');
+        if ((0,external_node_fs_namespaceObject.existsSync)(siblingRules)) {
+            try {
+                const raw = (0,external_node_fs_namespaceObject.readFileSync)(siblingRules, 'utf8');
+                const data = JSON.parse(raw);
+                const list = Array.isArray(data) ? data : (data?.rules || []);
+                const converted = this.parseRulesList(list);
+                if (converted.length > 0) {
+                    return converted;
+                }
+            }
+            catch {
+                void 0;
+            }
+        }
         return [...SECURITY_RULES];
+    }
+    static async loadAgentRules(source = 'embedded', workspaceDir = process.cwd()) {
+        const allRules = await this.loadRules(source, workspaceDir);
+        const filtered = allRules.filter(r => r.category === 'AI_SECURITY' || r.id.includes('ai-'));
+        if (filtered.length > 0) {
+            return filtered;
+        }
+        return [...DEFAULT_AGENT_RULES];
+    }
+    static buildAgentInstructions(rules) {
+        const targetRules = Array.isArray(rules) && rules.length > 0 ? rules : [...DEFAULT_AGENT_RULES];
+        const lines = [];
+        for (const r of targetRules) {
+            const text = (r.instruction || r.message || '').trim();
+            if (text) {
+                lines.push(`- ${text}`);
+            }
+        }
+        return lines.join('\n');
+    }
+    static sanitizeOutput(text, rules) {
+        if (!text || typeof text !== 'string')
+            return '';
+        const targetRules = Array.isArray(rules) && rules.length > 0 ? rules : [...DEFAULT_AGENT_RULES];
+        let result = text;
+        for (const r of targetRules) {
+            if (r.id === 'wide/ai-no-emojis' || r.id.includes('emoji')) {
+                result = result.replace(/(?:[\uD800-\uDBFF][\uDC00-\uDFFF]|[\u2600-\u27BF])/g, '');
+                result = result.replace(/\p{Extended_Pictographic}/gu, '');
+            }
+        }
+        return result;
     }
     static parseRulesList(list) {
         const result = [];
@@ -32311,6 +32492,7 @@ class RuleLoader {
             if (!item.id || !item.pattern)
                 continue;
             try {
+                const notMatchRaw = item['not-match'] || item.notMatch;
                 result.push({
                     id: item.id,
                     cwe: item.cwe || 'N/A',
@@ -32318,9 +32500,11 @@ class RuleLoader {
                     severity: item.severity || 'MEDIUM',
                     languages: item.languages || ['all'],
                     pattern: new RegExp(item.pattern, 'i'),
+                    notMatch: typeof notMatchRaw === 'string' && notMatchRaw ? new RegExp(notMatchRaw, 'i') : undefined,
                     sourcePattern: item['source-pattern'] ? new RegExp(item['source-pattern'], 'i') : undefined,
                     message: item.message || '',
-                    remediation: item.remediation || ''
+                    remediation: item.remediation || '',
+                    instruction: item.instruction || item.message || ''
                 });
             }
             catch {
@@ -32328,6 +32512,51 @@ class RuleLoader {
             }
         }
         return result;
+    }
+    static async loadAdvisories(source = 'embedded', workspaceDir = process.cwd()) {
+        if (source.trim().toLowerCase() === 'latest') {
+            try {
+                let checksums = new Map();
+                try {
+                    const sumRes = await fetch(REMOTE_CHECKSUMS_URL);
+                    if (sumRes.ok)
+                        checksums = parseChecksums(await sumRes.text());
+                }
+                catch {
+                    void 0;
+                }
+                const res = await fetch(REMOTE_OSV_URL);
+                if (res.ok) {
+                    const raw = await res.text();
+                    const expectedSha = checksums.get('osv-bundle.json');
+                    if (expectedSha) {
+                        const actualSha = (0,external_node_crypto_.createHash)('sha256').update(raw).digest('hex');
+                        if (actualSha !== expectedSha) {
+                            throw new Error('SHA-256 mismatch while downloading osv-bundle.json');
+                        }
+                    }
+                    return JSON.parse(raw);
+                }
+            }
+            catch (err) {
+                core.warning(`Failed to fetch latest OSV advisories: ${String(err)}.`);
+            }
+        }
+        const candidates = [
+            (0,external_node_path_namespaceObject.resolve)(workspaceDir, '.wide', 'osv.json'),
+            (0,external_node_path_namespaceObject.resolve)(workspaceDir, '../wide-rules/dist/osv-bundle.json')
+        ];
+        for (const file of candidates) {
+            if ((0,external_node_fs_namespaceObject.existsSync)(file)) {
+                try {
+                    return JSON.parse((0,external_node_fs_namespaceObject.readFileSync)(file, 'utf8'));
+                }
+                catch {
+                    void 0;
+                }
+            }
+        }
+        return { npm: [], pip: [], maven: [], go: [] };
     }
 }
 
@@ -32438,6 +32667,7 @@ class Commitment {
 ;// CONCATENATED MODULE: ./src/remediation/engine.ts
 
 
+
 class RemediationEngine {
     provider;
     apiKey;
@@ -32495,7 +32725,8 @@ class RemediationEngine {
         }
     }
     buildPrompt(finding, context) {
-        return [
+        const guardrails = RuleLoader.buildAgentInstructions();
+        const parts = [
             'You are an automated secure code remediation assistant.',
             `Vulnerability Detected: ${finding.title} (${finding.cwe || 'CWE'})`,
             `Severity: ${finding.severity}`,
@@ -32512,9 +32743,12 @@ class RemediationEngine {
             '```suggestion',
             '<replacement code here>',
             '```',
-            'Do not include any explanations, prose, or commentary outside the suggestion block.',
-            'Do not use emojis under any circumstances.'
-        ].join('\n');
+            'Do not include any explanations, prose, or commentary outside the suggestion block.'
+        ];
+        if (guardrails) {
+            parts.push('', 'Ecosystem Agent Guardrails (wide-rules):', guardrails);
+        }
+        return parts.join('\n');
     }
     async callGemini(prompt) {
         const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${this.apiKey}`;
@@ -32610,15 +32844,15 @@ class RemediationEngine {
             return null;
         const match = raw.match(/```suggestion\r?\n([\s\S]*?)\r?\n```/);
         if (match && match[1] !== undefined) {
-            return match[1].trimEnd().replace(/\p{Extended_Pictographic}/gu, "");
+            return RuleLoader.sanitizeOutput(match[1].trimEnd());
         }
         const codeBlockMatch = raw.match(/```(?:[a-zA-Z0-9_\-]+)?\r?\n([\s\S]*?)\r?\n```/);
         if (codeBlockMatch && codeBlockMatch[1] !== undefined) {
-            return codeBlockMatch[1].trimEnd().replace(/\p{Extended_Pictographic}/gu, "");
+            return RuleLoader.sanitizeOutput(codeBlockMatch[1].trimEnd());
         }
         const trimmed = raw.trim();
         if (trimmed && !trimmed.includes('```')) {
-            return trimmed.replace(/\p{Extended_Pictographic}/gu, "");
+            return RuleLoader.sanitizeOutput(trimmed);
         }
         return null;
     }
@@ -32917,7 +33151,7 @@ function generateSarifReport(findings, customRules) {
                 tool: {
                     driver: {
                         name: 'Wide Security',
-                        version: '0.291126',
+                        version: '0.3141126',
                         informationUri: 'https://github.com/sl4de0day/wide-action',
                         rules: Array.from(rulesMap.values())
                     }

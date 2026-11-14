@@ -7,6 +7,7 @@ export interface SecurityRule {
   severity: SeverityLevel;
   languages: string[];
   pattern: RegExp;
+  notMatch?: RegExp;
   sourcePattern?: RegExp;
   message: string;
   remediation: string;

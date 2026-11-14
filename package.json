@@ -1,6 +1,6 @@
 {
   "name": "wide-action",
-  "version": "0.291126",
+  "version": "0.3141126",
   "description": "Autonomous PR Security Auditor and CI/CD Gate for the Wide Ecosystem",
   "type": "module",
   "main": "dist/index.js",
