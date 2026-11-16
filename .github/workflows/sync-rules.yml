@@ -17,10 +17,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout wide-action
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Checkout upstream wide-rules
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: sl4de0day/wide-rules
           ref: main
