@@ -1,7 +1,7 @@
 <p align="center">
   <img src="assets/wide-logo.png" alt="Wide Action" width="128">
   <h1 align="center">Wide Action</h1>
-  <p align="center">CI/CD-first autonomous security gate and pull request auditor for the Wide ecosystem</p>
+  <p align="center">Wide's security rules as a pull request gate in GitHub CI, with AI-suggested fixes</p>
 </p>
 
 <p align="center">
@@ -19,10 +19,12 @@
 
 ---
 
+> **Wide blends web development and web security into one AI-powered workflow.** Write the code, catch the vulnerability, and test the fix in the same place.
+
 **Wide Action is the official GitHub Action for the Wide ecosystem that brings static application security testing (SAST), software composition analysis (SCA), differential pull request auditing, and autonomous AI-assisted vulnerability remediation directly into CI/CD pipelines. Running with zero external runtime dependencies on Node 24, it enforces security gates, writes GitHub Step Summaries, and posts contextual inline code review comments with automated fix suggestions.**
 
 Wide Action is designed for rapid execution and seamless pull request integration:
-- **Zero-Dependency Runner:** Pre-compiled Node 24 bundle executing directly inside the GitHub Actions runner without npm install overhead, embedding the full 729-rule Wide Rules catalog and 480-advisory OSV bundle.
+- **Zero-Dependency Runner:** Pre-compiled Node 24 bundle executing directly inside the GitHub Actions runner without npm install overhead, embedding the full Wide Rules catalog (750+ rules) and OSV advisory bundle (800+ advisories).
 - **Differential Scanning:** Analyzes only modified files and git diff hunks to keep pull request checks fast and developer-friendly.
 - **Ecosystem Integration:** Shares AST/regex security patterns, AI agent guardrails, OSV/KEV/EPSS feeds, and SARIF reporting across Wide IDE, Wide CLI, and Wide SDK.
 
@@ -132,6 +134,19 @@ npm install
 npm test
 npm run build
 ```
+
+## The Wide Ecosystem
+
+Wide blends web development and web security into one AI-powered workflow. Every product runs on the same security rules, so a vulnerability caught in one place is caught everywhere.
+
+| Product | Who it is for |
+| :--- | :--- |
+| [Wide IDE](https://github.com/sl4de0day/wide-ide) | **The flagship.** A full IDE for web developers and pentesters: write code, see vulnerabilities as you type, and test them with built-in pentest tools and AI agents. |
+| [Wide App](https://github.com/sl4de0day/wide-app) | A prompt-only AI workspace for people who do not need a full IDE. Describe the task; Wide's agents build, fix, and audit the project. |
+| [Wide CLI](https://github.com/sl4de0day/wide-cli) | The same AI agents and security scanner in your terminal. |
+| [Wide Action](https://github.com/sl4de0day/wide-action) | The same rules as a pull request security gate in GitHub CI. |
+| [Wide SDK](https://github.com/sl4de0day/wide-sdk) | A Python library for building your own agents on Wide's security tooling. |
+| [Wide Rules](https://github.com/sl4de0day/wide-rules) | The shared rule and advisory database behind every Wide product. |
 
 ## License
 

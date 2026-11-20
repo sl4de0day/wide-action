@@ -1,13 +1,15 @@
 {
   "name": "wide-action",
-  "version": "0.6191126",
-  "description": "Autonomous PR Security Auditor and CI/CD Gate for the Wide Ecosystem",
+  "version": "0.7211126",
+  "description": "Wide's security rules as a pull request gate in GitHub CI, with AI-suggested fixes",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
     "build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && ncc build src/index.ts -o dist --minify --license licenses.txt",
     "compile": "tsc",
-    "sync:bundle": "node scripts/sync-bundle.mjs",
+    "sync:bundle": "node scripts/sync-bundle.mjs && node scripts/sync-engine.mjs",
+    "sync:engine": "node scripts/sync-engine.mjs",
+    "check:engine": "node scripts/sync-engine.mjs --check",
     "test": "node -e \"require('node:fs').rmSync('lib', { recursive: true, force: true })\" && tsc && node scripts/run-tests.mjs"
   },
   "repository": {

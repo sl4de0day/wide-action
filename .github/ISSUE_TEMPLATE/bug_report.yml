@@ -7,7 +7,7 @@ body:
     id: action_version
     attributes:
       label: Wide Action Version or Tag
-      placeholder: v1 / v0.6191126
+      placeholder: v1 / v0.7211126
     validations:
       required: true
   - type: textarea

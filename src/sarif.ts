@@ -4,7 +4,7 @@ import * as core from '@actions/core';
 import { SECURITY_RULES } from './engine/rules.js';
 import { SeverityLevel, VulnerabilityFinding } from './types.js';
 
-const DEFAULT_ACTION_VERSION = '0.6191126';
+const DEFAULT_ACTION_VERSION = '0.7211126';
 
 function resolveToolVersion(): string {
   const envVersion = process.env.npm_package_version;

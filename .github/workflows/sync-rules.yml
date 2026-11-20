@@ -9,6 +9,10 @@ permissions:
   contents: write
   pull-requests: write
 
+concurrency:
+  group: wide-action-bundle-sync
+  cancel-in-progress: false
+
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
@@ -45,27 +49,44 @@ jobs:
         id: create_pr
         uses: peter-evans/create-pull-request@v8
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.WIDE_ECOSYSTEM_TOKEN || secrets.GITHUB_TOKEN }}
+          committer: wide-rules-bot <wide-rules-bot@users.noreply.github.com>
+          author: wide-rules-bot <wide-rules-bot@users.noreply.github.com>
           commit-message: "chore(bundle): sync latest wide-rules and OSV advisories"
           title: "chore(bundle): sync latest rules and OSV advisories"
           body: "Automated update triggered by wide-rules changes, verified with npm test and npm run build."
           branch: chore/sync-wide-rules
           delete-branch: true
 
-      - name: Auto-Merge Updated Bundle PR
+      - name: Auto-Merge Updated Bundle PR After Required Checks
         id: merge_pr
         if: steps.create_pr.outputs.pull-request-number != ''
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ steps.create_pr.outputs.pull-request-number }}
         run: |
-          gh pr merge "$PR_NUMBER" --repo "${{ github.repository }}" --squash --delete-branch || gh pr merge "$PR_NUMBER" --repo "${{ github.repository }}" --auto --squash --delete-branch
+          gh pr merge "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --auto --squash --delete-branch
+          for i in $(seq 1 80); do
+            state=$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json state -q .state)
+            if [ "$state" = "MERGED" ]; then
+              sha=$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json mergeCommit -q .mergeCommit.oid)
+              echo "merge_sha=$sha" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            if [ "$state" = "CLOSED" ]; then
+              echo "PR #$PR_NUMBER was closed without merging."
+              exit 1
+            fi
+            sleep 30
+          done
+          echo "PR #$PR_NUMBER was not merged within 40 minutes; required checks may not have run."
+          exit 1
 
       - name: Update v1 Release Tag
-        if: steps.merge_pr.outcome == 'success'
+        if: steps.merge_pr.outputs.merge_sha != ''
+        env:
+          MERGE_SHA: ${{ steps.merge_pr.outputs.merge_sha }}
         run: |
-          git config user.name "wide-rules-bot"
-          git config user.email "wide-rules-bot@users.noreply.github.com"
-          git fetch origin main --tags
-          git tag -f v1 origin/main
+          git fetch origin "$MERGE_SHA" --tags
+          git tag -f v1 "$MERGE_SHA"
           git push origin refs/tags/v1 --force

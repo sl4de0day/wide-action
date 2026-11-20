@@ -1,5 +1,5 @@
 name: 'Wide Action'
-description: 'Autonomous PR Security Auditor and CI/CD Gate for the Wide Ecosystem'
+description: 'Pull request security gate for web projects: SAST, SCA, and AI-suggested fixes from the Wide ecosystem'
 author: 'sl4de0day'
 inputs:
   github-token:
